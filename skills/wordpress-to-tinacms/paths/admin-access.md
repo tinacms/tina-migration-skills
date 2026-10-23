@@ -13,11 +13,16 @@ Use this path when the user has a working `/wp-admin` login. It produces the cle
 
 ### 1. Scaffold the new TinaCMS + Astro project
 
+Check Node first — the Astro starter's `engines.node` is pinned to `>=22.22.0` even though builds work on 22.14+. If the user is below 22.22, either upgrade or relax the engines field (and note it in the migration summary).
+
 ```bash
-npx create-tina-app@latest
+npx create-tina-app@latest <project-name> \
+  --template tina-astro-starter \
+  --pkg-manager pnpm \
+  --noTelemetry
 ```
 
-Pick the Astro template (unless discovery concluded Next.js — then pick that).
+Pick the Next.js starter (`tina-nextjs-starter`) only if discovery concluded Next.js.
 
 Open the new project and verify it starts:
 
@@ -31,6 +36,8 @@ The site runs at `http://localhost:3000`, with the editor at `http://localhost:3
 
 Commit this clean starter as the first commit. All subsequent migration work goes on branches.
 
+**Starter demo content:** the Tina Astro starter ships with `src/content/page/{home,about}.mdx` and several `src/content/blog/*.mdx` files. Decide now whether to strip them before you start adding migrated content, or at the end as a cleanup pass. Either way, call it out in the migration summary so the user doesn't ship demo content live.
+
 ### 2. Export WordPress content
 
 In `/wp-admin`:
@@ -41,27 +48,38 @@ In `/wp-admin`:
 
 Save `wp-export.xml` in a `migration/` directory in the new project (gitignored).
 
-### 3. Convert WordPress XML to Markdown
+### 3. Count what's in the export, then branch
 
-Use [`wordpress-export-to-markdown`](https://github.com/lonekorean/wordpress-export-to-markdown):
+Open `wp-export.xml` and count by `<wp:post_type>`:
 
 ```bash
-npx wordpress-export-to-markdown \
-  --input migration/wp-export.xml \
-  --output src/content/posts \
-  --folder-mode post-folder \
-  --save-images all
+grep -oE "<wp:post_type><!\[CDATA\[[^]]+\]\]></wp:post_type>" migration/wp-export.xml | sort | uniq -c
 ```
 
-Options cheat sheet:
+Typical output:
 
-| Flag | Purpose |
-|---|---|
-| `--folder-mode post-folder` | One folder per post; keeps images beside their post |
-| `--save-images all` | Downloads referenced images into each post folder |
-| `--prefix-date true` | Prefixes filenames with the publish date (recommended for blogs) |
+```
+      5 attachment
+      2 page
+     12 post
+      1 custom_css
+```
 
-Review the output. The tool handles core WP content; it does **not** handle shortcodes, page-builder blocks, or custom post types — those come out as raw HTML in the Markdown body and need human attention.
+Branch based on counts:
+
+- **If posts > 0:** use [`wordpress-export-to-markdown`](https://github.com/lonekorean/wordpress-export-to-markdown):
+  ```bash
+  npx wordpress-export-to-markdown \
+    --input migration/wp-export.xml \
+    --output src/content/blog \
+    --folder-mode post-folder \
+    --save-images all
+  ```
+- **If posts = 0:** skip `wordpress-export-to-markdown` entirely — it's biased toward posts and produces nothing useful for page-only sites. Go straight to step 4.
+
+Also note:
+- **`custom_css` entries** carry theme-level CSS the user wrote (often colors, overrides). Open them and decide whether to port into the new site's global CSS, apply site-wide, or drop. Surface the decision in the migration summary.
+- **Draft pages/posts** (`<wp:status>draft</wp:status>`) are usually test content left over from WP's install (e.g. the default Privacy Policy page). Skip them unless the user says otherwise.
 
 ### 4. Migrate pages separately
 
@@ -82,17 +100,39 @@ The HTML content still needs cleanup — WP's editor emits a lot of inline style
 
 ### 5. Move media
 
-If `wordpress-export-to-markdown` ran with `--save-images all`, images beside posts are already in `src/content/posts/<slug>/`.
+The export XML contains full `<wp:attachment_url>` entries for every media item — that's the cleanest source. Extract and download them:
 
-For media referenced by pages (not posts), copy the `/wp-content/uploads/<year>/<month>/` folder into `public/uploads/` on the new site. Preserve the year/month structure so old URLs still resolve.
+```bash
+grep -oE "<wp:attachment_url><!\[CDATA\[[^]]+\]\]></wp:attachment_url>" migration/wp-export.xml \
+  | sed -E 's/.*\[CDATA\[(.+)\]\].*/\1/' \
+  | while read url; do
+      curl -sS -o "public/uploads/$(basename "$url")" "$url"
+    done
+```
 
-Verify no broken images:
+If the site has an organized folder structure (`/wp-content/uploads/2024/03/foo.jpg`) and you want to preserve it, mirror the path:
+
+```bash
+# ... | while read url; do
+#   path="public/uploads/$(echo "$url" | sed -E 's|.*/wp-content/uploads/||')"
+#   mkdir -p "$(dirname "$path")" && curl -sS -o "$path" "$url"
+# done
+```
+
+If `wordpress-export-to-markdown` ran with `--save-images all`, images beside posts are already in `src/content/blog/<slug>/`.
+
+Rewrite any remaining `https://<old-site>/wp-content/uploads/...` references in your migrated content to `/uploads/...` with a `sed` pass:
+
+```bash
+find src/content -type f -name "*.mdx" -exec sed -i '' -E \
+  "s|https://<old-site>/wp-content/uploads/[0-9]{4}/[0-9]{2}/|/uploads/|g" {} +
+```
+
+Verify no broken references remain:
 
 ```bash
 grep -rE "src=['\"](http[s]?://|/wp-content)" src/content/ | head
 ```
-
-Rewrite any remaining `https://<old-site>/wp-content/uploads/...` to `/uploads/...` with a `sed` pass.
 
 ### 6. Define the TinaCMS schema
 
