@@ -6,7 +6,7 @@ Each skill is a reusable, discoverable prompt that an AI assistant (Claude Code,
 
 ## Status
 
-Early. First skill — `migrate-wordpress-to-tinacms` — is in progress. See issue [tinacms/tina.io#4959](https://github.com/tinacms/tina.io/issues/4959) for scope and progress.
+Early. First skill — `wordpress-to-tinacms` — is in progress. See issue [tinacms/tina.io#4959](https://github.com/tinacms/tina.io/issues/4959) for scope and progress.
 
 ## Repository layout
 
@@ -15,7 +15,7 @@ tina-migration-skills/
 ├── README.md                                   # this file
 ├── LICENSE                                     # MIT
 └── skills/
-    ├── migrate-wordpress-to-tinacms/
+    ├── wordpress-to-tinacms/
     │   ├── SKILL.md                            # the skill prompt the AI loads
     │   ├── discovery.md                        # discovery questions asked up front
     │   ├── paths/
@@ -31,13 +31,13 @@ tina-migration-skills/
 
 ### Skill folder names
 
-`migrate-<source>-to-tinacms`
+`<source>-to-tinacms`
 
-- `migrate-wordpress-to-tinacms`
-- `migrate-drupal-to-tinacms`
-- `migrate-ghost-to-tinacms`
+- `wordpress-to-tinacms`
+- `drupal-to-tinacms`
+- `ghost-to-tinacms`
 
-Always lowercase, kebab-case, explicit verb, `tinacms` as the destination (single word, no hyphen).
+Always lowercase, kebab-case, `tinacms` as the destination (single word, no hyphen).
 
 ### Skill file structure
 
@@ -81,10 +81,10 @@ Skills are written as plain Markdown so they can be used with:
 ```bash
 # From your project root:
 mkdir -p .claude/skills
-cp -R /path/to/tina-migration-skills/skills/migrate-wordpress-to-tinacms .claude/skills/
+cp -R /path/to/tina-migration-skills/skills/wordpress-to-tinacms .claude/skills/
 ```
 
-Then invoke it from Claude Code the same way you invoke any skill (`/migrate-wordpress-to-tinacms` or ask Claude to use it).
+Then invoke it from Claude Code the same way you invoke any skill (`/wordpress-to-tinacms` or ask Claude to use it).
 
 ## Using a skill with other AI assistants
 
