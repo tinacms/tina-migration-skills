@@ -68,6 +68,19 @@ Every skill opens with discovery questions — current platform, access to sourc
 
 Migrated TinaCMS sites use `/admin` as the editor route (not `/wp-admin`). Document any other TinaCMS-specific destination conventions in each skill's `SKILL.md`.
 
+### Default frontend: Astro
+
+Skills default to [Astro](https://astro.build/) as the target frontend. [TinaCMS has made Astro its default starter](https://tina.io/blog/astro-is-becoming-the-default-tinacms-starter), and Astro's content-first, zero-JS-by-default model fits the kind of sites typically migrated off WordPress (blogs, agency sites, business brochures, portfolios).
+
+The discovery questions include a check for cases where [Next.js](https://nextjs.org/) is the better target:
+
+- user accounts or auth beyond read-only
+- server-rendered dashboards or admin-like features
+- a heavy React component library the team already owns
+- e-commerce with cart / checkout
+
+If a skill picks Next.js, it should say so explicitly and explain why in its output, so the user knows an escape hatch was taken.
+
 ### Portable prompts
 
 Skills are written as plain Markdown so they can be used with:
