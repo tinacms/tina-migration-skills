@@ -154,9 +154,32 @@ For each collection, create an Astro route that reads the Markdown and renders i
 
 The existing manual guide at https://tina.io/docs/guides/converting-wordpress-to-tina covers the exact Astro + content-collection patterns.
 
-### 8. Verify the `/admin` route
+### 8. Verify the `/admin` route locally
 
-Run `pnpm dev` and open `http://localhost:3000/admin`. All collections should be editable. If a field is missing or shows raw HTML where rich-text is expected, revisit the schema.
+Run the dev server:
+
+```bash
+pnpm dev     # or yarn dev — the starter runs `tinacms dev -c "astro dev"`
+```
+
+Three sanity checks against the local dev server (default Astro port `4321`):
+
+```bash
+# 1. Public page renders
+curl -sI http://localhost:4321/
+
+# 2. Editor shell loads
+curl -sI http://localhost:4321/admin/index.html
+
+# 3. TinaCMS GraphQL returns the migrated content
+curl -s -X POST http://localhost:4001/graphql \
+  -H "Content-Type: application/json" \
+  -d '{"query":"{ page(relativePath:\"home.mdx\"){seoTitle}}"}'
+```
+
+Open `http://localhost:4321/admin/index.html` in a browser — the TinaCMS editor should load with every collection editable. If a field is missing or shows raw HTML where rich-text is expected, revisit the schema in step 6.
+
+**At this point the site works end-to-end in local dev. It is NOT yet editable on a deployed site — that needs TinaCloud + hosting, next.**
 
 ### 9. Set up redirects
 
@@ -171,11 +194,74 @@ export default defineConfig({
 });
 ```
 
-### 10. Preview deploy
+### 10. Push to GitHub
 
-Push the repo to GitHub, connect it to the hosting target from discovery (Vercel / Netlify / Cloudflare Pages), and share the preview URL with the user.
+```bash
+git add -A
+git commit -m "Migrate from WordPress"
+gh repo create <org>/<repo> --public --source=. --push
+```
 
-### 11. Hand-off summary
+Pick a clear repo name tied to the site domain (e.g. `SSWConsulting/81military` for `81military.com.au`). The repo is where TinaCloud will read and commit content.
+
+### 11. Create the TinaCloud project
+
+TinaCloud is the hosted backend that lets `/admin` work on a deployed site. Local `yarn dev` works without it; production doesn't.
+
+1. Go to **https://app.tina.io** and sign in with GitHub.
+2. **Create a new project** → **Import existing project** → pick the repo you just pushed.
+3. Grant TinaCloud read/write access to that repo when the GitHub permission prompt appears.
+4. Configure:
+   - **Branch:** `main` (or whichever branch holds the editable content)
+   - **Path to Tina config:** blank unless the repo is a monorepo
+   - **Site URL(s):** `http://localhost:4321` (for local), and the production URL once it exists. TinaCloud only serves the editor on URLs listed here.
+5. Finish the wizard. TinaCloud lands you on the **Overview** page with the project's **Client ID**.
+6. Go to the **Tokens** tab → generate a **Content token** (read-only) → copy it.
+
+You now have the three values the deployed site needs:
+
+- `NEXT_PUBLIC_TINA_CLIENT_ID` — the Client ID from Overview
+- `TINA_TOKEN` — the Content token from Tokens
+- `NEXT_PUBLIC_TINA_BRANCH` — the branch, usually `main`
+
+### 12. Deploy to Vercel (or Netlify / Cloudflare Pages)
+
+Vercel is the fastest path for an Astro + TinaCMS site. The starter ships `@astrojs/vercel` already configured.
+
+1. Go to **https://vercel.com/new**, pick the GitHub repo.
+2. Framework preset: **Astro** (auto-detected).
+3. Before clicking **Deploy**, add Environment Variables:
+
+   | Name | Value | Environments |
+   |---|---|---|
+   | `NEXT_PUBLIC_TINA_CLIENT_ID` | from TinaCloud Overview | Production, Preview, Development |
+   | `TINA_TOKEN` | Content token from TinaCloud | Production, Preview, Development |
+   | `NEXT_PUBLIC_TINA_BRANCH` | `main` | Production, Preview, Development |
+
+4. **Project Settings → General → Node.js Version** — set to `22.x` (the Astro starter pins `>=22.22`; Vercel's current `22.x` LTS covers it).
+5. Click **Deploy**. First build takes ~2 minutes.
+
+Once the build is green, open the deploy URL. Two checks:
+
+```bash
+curl -sI https://<deploy-url>/           # public page: HTTP 200
+curl -sI https://<deploy-url>/admin/     # editor shell: HTTP 200
+```
+
+Then open `https://<deploy-url>/admin/` in a browser. You'll be prompted to log in through TinaCloud — any user you've invited to the TinaCloud project can edit, and saves commit back to the GitHub repo on the branch you configured.
+
+**Netlify / Cloudflare Pages:** same shape — pick the Astro preset, add the three env vars, deploy. The starter has adapters pre-installed for all three.
+
+### 13. Share the preview URL
+
+Send the deploy URL to the user. In the message include:
+
+- The URL
+- `yoursite.com/admin/` as the editing entry point
+- Who can log in (anyone you add to the TinaCloud project)
+- A note that this is a **preview**, not a replacement for the live site — production DNS stays on WordPress until the user says otherwise
+
+### 14. Hand-off summary
 
 Write a `MIGRATION-SUMMARY.md` in the project root listing:
 
