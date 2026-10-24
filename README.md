@@ -16,12 +16,12 @@ tina-migration-skills/
 ├── LICENSE                                     # MIT
 └── skills/
     ├── wordpress-to-tinacms/
-    │   ├── SKILL.md                            # the skill prompt the AI loads
-    │   ├── discovery.md                        # discovery questions asked up front
-    │   ├── paths/
-    │   │   ├── admin-access.md                 # primary path — fully worked
-    │   │   ├── php-source.md                   # secondary — scaffolded
-    │   │   └── scraping.md                     # secondary — scaffolded
+    │   ├── SKILL.md                            # orchestrator prompt the AI loads
+    │   ├── discovery.md                        # questions asked up front
+    │   ├── admin-tour.md                       # how the schema is derived from /wp-admin
+    │   ├── schema-mapping.md                   # WP field type → Tina field type reference
+    │   ├── scripts/
+    │   │   └── wp-admin-tour.ts                # reference Playwright script
     │   └── examples/
     │       └── <case-study>.md                 # worked examples from real migrations
     └── (future skills follow the same shape)
@@ -45,9 +45,11 @@ Every skill folder contains:
 
 | File | Purpose |
 |---|---|
-| `SKILL.md` | The main prompt the AI loads. Describes the skill's purpose, when to use it, inputs, outputs, and sub-steps. |
+| `SKILL.md` | The main orchestrator prompt the AI loads. Describes the skill's purpose, when to use it, inputs, outputs, and sub-steps. |
 | `discovery.md` | The questions the skill asks the user up front, before doing any work. See [Discovery first](#discovery-first). |
-| `paths/<entry-point>.md` | One file per supported starting point (admin access, source-code access, scraping, etc.). |
+| `admin-tour.md` *(or similar)* | How the skill derives its target schema from the source — observation of the source CMS's editor, not scraping or exports. |
+| `schema-mapping.md` | Reference table — source field types → TinaCMS field types. |
+| `scripts/*.ts` | Reference automation scripts (Playwright tours, transformers). |
 | `examples/<case-study>.md` | Walkthroughs of real migrations run with this skill. |
 
 ### Repo name
@@ -56,13 +58,17 @@ Every skill folder contains:
 
 ## Design principles
 
-### One skill, multiple entry points
+### Observe the source editor, don't guess
 
-Prefer **one skill with branching paths** over many disconnected prompts. A single skill asks discovery questions, decides which entry-point path to follow, and keeps the user in one coherent conversation.
+The goal of a migration isn't just to move the content — it's to give editors a CMS that feels like the one they already know. Each skill derives its target TinaCMS schema from the source CMS's editor itself (for WordPress: a Playwright tour of `/wp-admin`). Field names, groupings, and types mirror what editors see today. This is the heart of each skill — not the content transformation.
+
+### Local-first delivery
+
+Skills produce a **working local project** — `yarn dev` runs it, `localhost:4321/admin` is the editor. TinaCloud, hosting, DNS, and SEO cutover are deliberately out of scope. Those are decisions the team makes separately once they're happy with the local pilot.
 
 ### Discovery first
 
-Every skill opens with discovery questions — current platform, access to source / admin / files, authentication method, target framework (Next.js, Astro, etc.), hosting, timeline. The skill does not start modifying files until it has the answers it needs. Example questions live in each skill's `discovery.md`.
+Every skill opens with discovery questions — source URL, admin credentials (stored only in `.env.local`), target framework (Astro by default), scope boundaries. The skill does not start modifying files until it has the answers it needs. Example questions live in each skill's `discovery.md`.
 
 ### Destination details
 

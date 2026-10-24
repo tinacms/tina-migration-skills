@@ -1,95 +1,101 @@
 # Case study: 81military.com.au
 
-A worked example of the `wordpress-to-tinacms` skill applied to [81military.com.au](https://81military.com.au/).
+Pilot of the `wordpress-to-tinacms` skill against [81military.com.au](https://81military.com.au/). Local-only migration; no live deployment.
 
-## Site profile (from discovery)
+## Site profile
 
 | Attribute | Value |
 |---|---|
 | Source URL | https://81military.com.au/ |
 | Platform | WordPress 7.1.3 on **WP Engine** |
-| Theme | Twenty Sixteen (default WordPress theme, unmodified) |
+| Theme | Twenty Sixteen (default, unmodified) |
 | Pages | 1 published (`Gateway Court`, slug `sample-page`) + 1 draft (`Privacy Policy`, default WP template) |
 | Posts | 0 |
 | Custom post types | None |
-| Media items | 5 attachments: SSW-Sydney.jpg + 4 logo/favicon PNGs |
-| Theme customization | 1 custom_css entry: `h2 {color:#cc4141;}` |
-| Plugins visible on page source | `honeypot` (anti-spam only) |
+| Taxonomies | Just `category` (empty, no categories defined) |
+| Media | 5 attachments: SSW-Sydney.jpg + 4 logo/favicon PNGs |
+| Theme customization | 1 `custom_css` entry: `h2 {color:#cc4141;}` |
+| Plugins visible | `honeypot` (anti-spam only) |
 | Page-builders | None (plain Gutenberg) |
-| Forms | None |
-| REST API | Open |
 
-## Entry point used
+81military is at the minimum-complexity end of the WordPress spectrum — a near-empty install serving a single landing page. That makes it an ideal pilot because every step of the skill runs through quickly without being distracted by custom themes, page-builders, or large content sets. A richer pilot (SSW's own ssw.com.au-style site with ACF, Yoast, and dozens of CPTs) is the natural follow-up.
 
-**Admin access** — the user ran `Tools → Export → All content` in `/wp-admin` and provided the resulting `WordPress.xml` file.
+## What the admin tour would surface
 
-## Target stack
+Projecting from the WordPress export we have on hand (an admin tour against the live site would confirm):
 
-- **Frontend:** Astro (default) — `tina-astro-starter` via `npx create-tina-app@latest`
-- **Content storage:** TinaCMS content collections in the same Git repo
-- **Editor backend:** TinaCloud (to configure)
-- **Editor URL:** `/admin`
+```json
+{
+  "siteUrl": "https://81military.com.au",
+  "wpVersion": "7.1.3",
+  "postTypes": [
+    {
+      "name": "page",
+      "label": "Pages",
+      "fields": [
+        { "name": "title",   "label": "Title",   "type": "string", "isTitle": true, "required": true },
+        { "name": "body",    "label": "Content", "type": "rich-text" },
+        { "name": "excerpt", "label": "Excerpt", "type": "string", "ui": { "component": "textarea" } }
+      ]
+    },
+    {
+      "name": "post",
+      "label": "Posts",
+      "fields": [
+        { "name": "title",      "label": "Title",      "type": "string", "isTitle": true, "required": true },
+        { "name": "body",       "label": "Content",    "type": "rich-text" },
+        { "name": "excerpt",    "label": "Excerpt",    "type": "string", "ui": { "component": "textarea" } },
+        { "name": "categories", "label": "Categories", "type": "reference", "list": true, "collections": ["category"] },
+        { "name": "tags",       "label": "Tags",       "type": "reference", "list": true, "collections": ["tag"] }
+      ]
+    }
+  ],
+  "taxonomies": [
+    { "name": "category", "label": "Categories", "postTypes": ["post"] }
+  ],
+  "plugins": { "acf": false, "yoast": false, "rankMath": false }
+}
+```
 
-## Steps actually executed
+No ACF, no Yoast, no custom post types — the schema is the WordPress default. A real site with plugin-driven editorial UX would surface richer field sets here, and the mapper in `schema-mapping.md` would translate them.
 
-1. **Copied `WordPress.xml` + downloaded media** into a local `migration/` workspace. Media URLs enumerated by `grep "<wp:attachment_url>"` in the XML and `curl`'d publicly (no auth needed).
-2. **Scaffolded site:** `npx create-tina-app@latest 81military-site --template tina-astro-starter --pkg-manager pnpm`.
-3. **Relaxed `engines.node`** in `package.json` from `>=22.22.0` to `>=22.14.0` — see "Lessons" below.
-4. **Copied media** to `public/uploads/`.
-5. **Transformed Gateway Court content** from Gutenberg block comments to a single `content` block in `src/content/page/gateway-court.mdx`. Rewrote image `src` from `https://81military.com.au/wp-content/uploads/.../SSW-Sydney.jpg` → `/uploads/SSW-Sydney.jpg`.
-6. **Built** with `yarn build:local` → `/gateway-court/index.html` emitted. All 5 media files served from `/uploads/`.
-7. **Committed** on branch `migration/wordpress-to-tinacms` of a local repo at `~/ClaudeCode/81military-site`.
+## Pilot output (local)
 
-## Output
+Repo: [SSWConsulting/81military](https://github.com/SSWConsulting/81military)
 
 | Artifact | Where |
 |---|---|
-| Astro + TinaCMS site | `~/ClaudeCode/81military-site` (local; not yet pushed to a GitHub repo) |
-| Migrated page | `src/content/page/gateway-court.mdx` |
-| Migrated media | `public/uploads/*.{jpg,png}` (5 files) |
-| Preview URL | None yet — hosting target not chosen |
+| Astro + TinaCMS site | `~/ClaudeCode/81military-site/` (local) |
+| Collections generated | `tina/collections/page.ts`, `tina/collections/post.ts` (per the derived schema above) |
+| Migrated content | `src/content/page/home.mdx` (Gateway Court, served at `/`) |
+| Migrated media | `public/uploads/*` (5 files) |
+| Verified | `yarn dev` → `/` renders Gateway Court, `/admin/index.html` loads TinaCMS editor, GraphQL returns the migrated page ✓ |
 
-## Open items before cut-over
+**Scope boundary:** this pilot stops at local. TinaCloud + Vercel deployment is deliberately out of scope for this skill (see the "Local-first delivery" principle in the repo README). If the user later wants a hosted preview, that's a separate decision following standard TinaCMS deployment docs.
 
-- [ ] Decision on the target GitHub repo (`SSWConsulting/81military-com-au` or similar)
-- [ ] TinaCloud project set up (clientId, token, branch)
-- [ ] Hosting target chosen + deployed (Vercel / Netlify / Cloudflare Pages)
-- [ ] Redirect `/sample-page` → `/gateway-court` (and `/?page_id=2` → `/gateway-court`)
-- [ ] Decision: keep or strip the starter's demo content (`about.mdx`, `home.mdx`, blog posts) before the final build
-- [ ] Replace favicon with `cropped-ssw-squares.png` from the migrated media
-- [ ] Apply the `h2 {color:#cc4141;}` style override somewhere, or decide it's no longer needed
-- [ ] DNS cut-over at the user's call
+## How to run the pilot locally
+
+```bash
+git clone https://github.com/SSWConsulting/81military.git
+cd 81military
+yarn install --ignore-engines
+yarn dev
+# Public site: http://localhost:4321/
+# Editor:      http://localhost:4321/admin/index.html
+```
 
 ## Lessons learned (fed back into the skill)
 
-### 1. `wordpress-export-to-markdown` is wrong-first for page-only sites
+1. **For near-empty sites, `wordpress-export-to-markdown` is wrong-first** — it's post-biased and produces nothing for page-only sites. The skill now counts `<wp:post_type>` entries and branches.
+2. **The XML already contains full media URLs** via `<wp:attachment_url>` — cleaner than enumerating via the REST API.
+3. **Starter's `engines.node >=22.22.0` is stricter than Astro actually needs** — the skill checks early and either upgrades or relaxes.
+4. **Starter ships demo content** (`home.mdx`, `about.mdx`, blog posts) that would leak into production — the skill strips immediately after scaffolding.
+5. **The Astro starter's `page` collection uses a block-based schema**, not a flat body field. For a WordPress page, mapping to a single `content` block holding the body is the straightforward move; a richer page with hero + feature grid + CTA justifies hand-crafting multiple blocks.
+6. **Gutenberg block comments strip cleanly** — the HTML inside the `<!-- wp:... -->` wrappers is the content.
+7. **Heading-level semantics are a conversion decision** — the Gateway Court page used `<h4>` as styled section dividers and `<h2>` for business names. Preserve by default; ask before "cleaning up" semantics.
+8. **The `custom_css` post type carries real styling** — surface for the user to decide: port into the new site's global CSS, apply site-wide, or drop.
 
-The current admin-access path recommends `wordpress-export-to-markdown` as step 3. That tool is biased toward **posts** — for a page-only site like 81military it produces zero output. Fix: the skill should branch on content shape after discovery. If posts count = 0, skip that tool and go straight to the page-conversion step.
+## Still-open follow-ups
 
-### 2. Media is already in the XML — no public downloads needed
-
-The exported XML contains full `<wp:attachment_url>` entries. Extracting those with `grep` and downloading is cleaner than enumerating via the REST API. For sites behind auth where the API isn't open, the XML remains the ground truth.
-
-### 3. Starter `engines.node` is stricter than Astro actually needs
-
-The current `tina-astro-starter` pins `node >=22.22.0`. Builds succeed on 22.14+. Skill should check the user's Node version early, warn if below 22.22, and either (a) prompt to upgrade or (b) relax the engines field with a note in the migration summary.
-
-### 4. The Astro starter uses a block-based page schema
-
-Pages are composed of blocks (`hero`, `features`, `content`, etc.), not a single body field. Most WordPress pages map cleanly to one `content` block holding the markdown. More structured WP pages (hero image + feature grid + CTA) can be mapped to multiple blocks, but that's a hand-crafted decision per page.
-
-### 5. Gutenberg block comments strip cleanly
-
-The `<!-- wp:paragraph -->` / `<!-- /wp:paragraph -->` comments are safe to strip wholesale — the inner HTML/text is the content. The skill can regex-strip these before HTML → Markdown conversion.
-
-### 6. The starter ships with demo content that will leak into the production build
-
-`src/content/page/{home,about}.mdx` and `src/content/blog/*.mdx` ship with the Tina Astro starter. If left in, they appear in the live site. The skill should ask up front whether to strip them, and either delete them early or output a cleanup checklist at the end.
-
-### 7. Heading-level semantics are a conversion decision
-
-The source page used `h4` as a styled section-divider (centered) and `h2` for business names. A faithful conversion preserves this. A "semantic cleanup" conversion promotes dividers to proper heading levels. The skill should preserve by default and ask before cleaning up — document the trade-off either way in the migration summary.
-
-### 8. The `custom_css` post type carries real styling
-
-Export includes a `custom_css` post with `h2 {color:#cc4141;}`. The skill should surface these so the user can decide to port them into the new site's CSS, apply them site-wide, or drop them.
+- [ ] Run the Playwright `wp-admin-tour.ts` against a live `/wp-admin` for the first time — the script is a reference implementation and needs validation. 81military would need admin creds; a richer SSW site would exercise more of the script.
+- [ ] Test the script against a site with ACF + Yoast to validate the plugin-detection and field-mapping paths.

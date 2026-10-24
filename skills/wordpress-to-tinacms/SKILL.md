@@ -1,95 +1,158 @@
 ---
 name: wordpress-to-tinacms
-description: Migrate an existing WordPress website to TinaCMS on Astro (default) or Next.js. Asks discovery questions, picks the right starting path based on the access the user has (admin, PHP source, or scraping), and executes the migration end-to-end including content, media, routing, and the /admin editor.
+description: Migrate a WordPress website to TinaCMS on Astro, locally, by observing /wp-admin and mirroring its editorial schema. The skill drives a headless browser into /wp-admin, discovers post types / fields / taxonomies, generates matching TinaCMS collections, exports and transforms the content, and leaves you with a working local site whose /admin editor matches the WordPress editor the content team already knows.
 ---
 
-# WordPress → TinaCMS migration
+# WordPress → TinaCMS migration (local, /wp-admin-driven)
 
-You are helping a user replace an existing WordPress site with a TinaCMS-powered site. The target stack defaults to **Astro** (see `paths/admin-access.md`); switch to **Next.js** only if discovery indicates app-like features (see "When to pick Next.js" below).
+You are helping a user replace a WordPress site with a TinaCMS-powered Astro site. The deliverable is a **local project** — `yarn dev` runs it, `localhost:4321/admin` serves the editor. No TinaCloud, no hosting, no DNS cutover in this skill's scope.
+
+The guiding principle: **the TinaCMS editor should feel like the WordPress editor the team is already using.** You achieve that by observing `/wp-admin` and mirroring its schema — same post types, same field names, same groupings — before you touch any content.
 
 ## 0. Before you start
 
-**Never modify the live WordPress site.** All work happens on a new TinaCMS project in a separate repository. The user keeps the current site live until they explicitly cut over.
+**Never modify the live WordPress site.** All work happens locally in a new project directory.
 
-## 1. Discovery
+**Never log, print, or write credentials to disk** outside the user's local `.env.local` file. See step 1.
 
-**Always start here.** Open `discovery.md` and ask the questions in order. Do not skip. Do not start migrating anything until every required answer is captured. Record answers in a short Markdown block the user can keep for reference:
+## 1. Collect credentials securely
 
-```markdown
-## Migration context
-- Source URL: ...
-- Entry point: admin-access | php-source | scraping
-- Target frontend: astro | nextjs
-- Hosting target: vercel | netlify | cloudflare-pages | self-hosted
-- Content repo: same | separate
-...
+Ask the user to create `migration/.env.local` in their working directory with:
+
+```
+WP_ADMIN_URL=https://example.com/wp-admin
+WP_USERNAME=...
+WP_PASSWORD=...
 ```
 
-## 2. Pick a path
+Add `migration/.env.local` to `.gitignore` immediately. Never read these values into chat; the Playwright script reads them from the env file directly.
 
-Based on the discovery answers, open **one** of the files under `paths/` and follow it:
+If the WordPress site enforces 2FA or SSO on `/wp-admin`, headless login fails. Flag this up front and ask the user whether to (a) temporarily disable 2FA for the migration account, (b) use an app password / API token if the plugin supports it, or (c) run the script headed and let the user complete 2FA interactively.
 
-| Access the user has | Path to open |
-|---|---|
-| WordPress admin login | `paths/admin-access.md` ← **recommended; use whenever available** |
-| PHP source code / server access, no admin | `paths/php-source.md` |
-| None of the above — only the public site | `paths/scraping.md` |
+## 2. Discovery
 
-If discovery reveals the user has more than one, prefer admin access. It produces the cleanest export with the least guesswork about data types, taxonomies, and media URLs.
+Open `discovery.md`. Ask the user the questions that aren't yet answered. Record the answers in `migration/context.md` for your own reference.
 
-## 3. Target framework
+## 3. Tour /wp-admin and derive the schema
 
-**Default: Astro.** Astro is TinaCMS's default starter and matches the typical WordPress-replacement site (blog, agency site, business brochure, portfolio) best.
+Install Playwright locally:
 
-### When to pick Next.js instead
+```bash
+npm init -y
+npm i -D playwright @types/node typescript tsx
+npx playwright install chromium
+```
 
-Ask one question in discovery, and switch only if the answer is yes:
+Copy `scripts/wp-admin-tour.ts` from this skill into `migration/`. Run it:
 
-> Does the current site have, or does the new site need, any of these: user accounts beyond read-only, a logged-in dashboard, server-rendered personalized pages, cart/checkout, or heavy React component libraries the team already owns?
+```bash
+tsx migration/wp-admin-tour.ts
+```
 
-If Next.js is picked, say so explicitly in the summary you give the user, with the specific reason.
+The script logs in, walks the admin menu, visits each post type's **Add New** screen, and emits a JSON manifest at `migration/schema.json` describing every post type and its fields. See `admin-tour.md` for exactly what the script does and how to extend it for custom plugins.
 
-## 4. Destination conventions
+Review `migration/schema.json` with the user before generating any TinaCMS code. Flag:
 
-- The TinaCMS editor lives at `/admin`, **not** `/wp-admin`. Make sure the new site's docs and internal links use `/admin`.
-- Content is stored as Markdown / MDX / JSON files committed to Git. There is no WordPress database.
-- Set up TinaCloud for the editor backend (or self-hosted — ask in discovery).
-- Preserve existing URLs where possible. If a WordPress URL has to change, add a redirect.
+- Post types with zero fields other than title/body — likely plain pages, maps to a simple Tina collection
+- Post types backed by **ACF** (Advanced Custom Fields) or similar — the field manifest tells you exactly what to replicate
+- Taxonomies — map to Tina `reference` fields or `string` with `options`
+- Yoast / Rank Math SEO fields — map to a Tina `seo` object
 
-## 5. What to produce
+## 4. Map WordPress fields to TinaCMS collections
 
-By the end of the migration, deliver:
+Open `schema-mapping.md`. For each post type in `schema.json`, generate a `tina/collections/<post-type>.ts` file using the mapping table. Keep field names identical to WordPress where possible — `title`, `date`, `author`, `featured_image`, `excerpt` — so editors see the same labels.
 
-1. A new Git repository with:
-   - The TinaCMS + Astro (or Next.js) project
-   - Migrated content as Markdown / MDX files
-   - Migrated media under `public/`
-   - `tina/config.ts` with the content schema derived from the WordPress content types
-2. A working `/admin` route the user can log into
-3. A preview deployment URL
-4. A short migration summary document listing: what was migrated, what was skipped and why, what URLs changed, and what manual work the user still needs to do (styling, forms, plugin replacements)
+Do NOT invent fields the WordPress editor doesn't expose. Fidelity to the existing editorial UX is the point.
 
-## 6. What NOT to automate
+## 5. Export the content
 
-Stop and ask the user before:
+Still inside the Playwright session, the script clicks **Tools → Export → All content** and downloads the XML to `migration/wp-export.xml`.
 
-- Pointing production DNS at the new site
-- Deleting anything from the old WordPress site
-- Rewriting content that doesn't survive the Markdown round-trip (e.g. shortcodes, page-builder blocks that need manual re-layout)
-- Replacing plugins — list the plugins in use and ask the user how each should be handled on the new stack
+If the Playwright export step fails (some hosts rate-limit downloads from headless sessions), fall back: ask the user to click Tools → Export → All content manually and drop the file into `migration/wp-export.xml` themselves.
 
-## 7. Report back
+## 6. Scaffold the local project
 
-When finished, output:
+```bash
+npx create-tina-app@latest <project-name> \
+  --template tina-astro-starter \
+  --pkg-manager pnpm \
+  --noTelemetry
+```
 
-- A summary of what the skill migrated
-- A list of plugins / shortcodes / custom post types that need human attention
-- The URL of the preview deployment
-- The command the user runs to start editing in `/admin`
+Pick Astro by default. Switch to `tina-nextjs-starter` only if discovery indicated app-like features (user accounts, dashboards, personalization, cart/checkout).
+
+Starter demo content strip — delete immediately so it doesn't confuse review:
+
+```bash
+rm src/content/page/{home,about}.mdx
+rm -f src/content/blog/*.mdx
+```
+
+Check Node version — starter pins `>=22.22.0`. If the user is below, either upgrade Node or relax `engines.node` in `package.json`.
+
+## 7. Install the generated collections
+
+Drop the `tina/collections/*.ts` files from step 4 into the new project. Wire them into `tina/config.ts`:
+
+```ts
+import { PageCollection } from './collections/page';
+import { PostCollection } from './collections/post';
+// ... one import per post type
+
+export default defineConfig({
+  schema: {
+    collections: [PageCollection, PostCollection, /* ... */]
+  }
+});
+```
+
+Also update the Astro content config at `src/content.config.ts` so each collection has a matching Astro content type.
+
+## 8. Transform and import the content
+
+Convert each `<item>` in `wp-export.xml` into a Markdown file under the matching collection folder, using the schema from step 4:
+
+- `<wp:post_type>` → which collection folder
+- `<wp:post_name>` → filename slug (`.mdx`)
+- `<wp:status>publish</wp:status>` only — skip drafts unless the user asks
+- `<content:encoded>` → body (strip Gutenberg block comments, convert HTML to Markdown)
+- `<wp:postmeta>` → frontmatter fields (match the names in the generated schema)
+- `<wp:attachment>` entries → download referenced images to `public/uploads/`, rewrite `<img src>` paths
+
+## 9. Verify locally
+
+```bash
+pnpm dev     # or yarn dev --ignore-engines
+```
+
+Three sanity checks against the local dev server:
+
+```bash
+curl -sI http://localhost:4321/                               # public page: HTTP 200
+curl -sI http://localhost:4321/admin/index.html               # editor shell: HTTP 200
+curl -s -X POST http://localhost:4001/graphql \
+  -H "Content-Type: application/json" \
+  -d '{"query":"{ page(relativePath:\"home.mdx\"){title}}"}'  # GraphQL returns data
+```
+
+Open `http://localhost:4321/admin/index.html` in a browser. Walk through each collection and compare side-by-side with `/wp-admin`. **The fields should look familiar — same labels, same groupings, same types.** If something looks wrong, that's feedback to tighten the schema mapping, not to add a workaround.
+
+## 10. Report back
+
+Produce `MIGRATION-SUMMARY.md` in the new project with:
+
+- The schema the admin tour discovered (link to `migration/schema.json`)
+- Counts of what was migrated (pages, posts, media, per custom post type)
+- Any post types or plugins skipped and why
+- The exact commands to run the local site: `pnpm install` + `pnpm dev` + the `/admin` URL
+- Known gaps vs. the WordPress editor — plugins or custom fields the schema mapping didn't cover
+
+**Explicitly state:** this is a local project. No TinaCloud, no deploy. Converting it to a live site is a separate decision the user makes later.
 
 ## Reference
 
-- Existing manual guide (content-only): https://tina.io/docs/guides/converting-wordpress-to-tina
-- TinaCMS starter: `npx create-tina-app@latest`
-- Astro + TinaCMS setup: https://tina.io/docs/frameworks/astro
-- Next.js + TinaCMS setup: https://tina.io/docs/frameworks/next/app-router
+- Schema derivation deep-dive: `admin-tour.md`
+- WordPress field type → TinaCMS field type table: `schema-mapping.md`
+- Reference Playwright tour script: `scripts/wp-admin-tour.ts`
+- Case study: `examples/81military-com-au.md`
+- Existing manual guide (content-only, no schema derivation): https://tina.io/docs/guides/converting-wordpress-to-tina
