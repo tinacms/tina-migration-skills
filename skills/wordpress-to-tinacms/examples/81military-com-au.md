@@ -45,8 +45,8 @@ Projecting from the WordPress export we have on hand (an admin tour against the 
         { "name": "title",      "label": "Title",      "type": "string", "isTitle": true, "required": true },
         { "name": "body",       "label": "Content",    "type": "rich-text" },
         { "name": "excerpt",    "label": "Excerpt",    "type": "string", "ui": { "component": "textarea" } },
-        { "name": "categories", "label": "Categories", "type": "reference", "list": true, "collections": ["category"] },
-        { "name": "tags",       "label": "Tags",       "type": "reference", "list": true, "collections": ["tag"] }
+        { "name": "categories", "label": "Categories", "type": "object", "list": true, "fields": [{ "name": "item", "type": "reference", "collections": ["category"] }] },
+        { "name": "tags",       "label": "Tags",       "type": "object", "list": true, "fields": [{ "name": "item", "type": "reference", "collections": ["tag"] }] }
       ]
     }
   ],
@@ -97,5 +97,5 @@ yarn dev
 
 ## Still-open follow-ups
 
-- [ ] Run the Playwright `wp-admin-tour.ts` against a live `/wp-admin` for the first time — the script is a reference implementation and needs validation. 81military would need admin creds; a richer SSW site would exercise more of the script.
-- [ ] Test the script against a site with ACF + Yoast to validate the plugin-detection and field-mapping paths.
+- [x] Test the script against a site with ACF + Yoast to validate the plugin-detection and field-mapping paths. Done against the local [`test-sites/wordpress`](../../../test-sites/wordpress/) (WordPress 7.1.3, ACF 6.8, Yoast 28.7).
+- [ ] Run `wp-admin-tour.ts` against a real hosted `/wp-admin` (WAF, 2FA, managed hosting like WP Engine). 81military would need admin creds; a richer SSW site would exercise more of the script.
