@@ -8,7 +8,8 @@
  *   public/uploads/...                        media, same paths as wp-content/uploads
  *   src/content/config/config.json            site title, tagline and nav (merged)
  *   src/lib/wordpress.json                    front page + posts page (merged)
- *   migration/transform-report.json           counts, skips and URL mismatches
+ *   astro.config.mjs                          `redirects` for the front page's slug and every changed URL
+ *   migration/transform-report.json           counts, skips, every new URL, and the URLs that changed
  *
  * Only published items are migrated unless you pass --drafts.
  *
@@ -55,6 +56,7 @@ type Item = {
   terms: { domain: string; slug: string }[];
   meta: Map<string, string>;
   attachmentUrl?: string;
+  comments: number;
 };
 
 const toTinaName = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
@@ -63,6 +65,11 @@ const report = {
   migrated: {} as Record<string, number>,
   skipped: [] as string[],
   media: 0,
+  /** Approved comments on migrated entries. Not migrated: they need a comments service. */
+  comments: 0,
+  /** New URL of every migrated entry. check-site.ts requests each one. */
+  urls: [] as string[],
+  /** Old WordPress URLs that changed. Each gets a redirect in astro.config.mjs. */
   urlMismatches: [] as { old: string; new: string }[],
   warnings: [] as string[],
 };
@@ -152,6 +159,7 @@ function parseExport(xml: string) {
     terms: asArray(it.category as Record<string, string>[]).map((c) => ({ domain: c['@_domain'], slug: c['@_nicename'] })),
     meta: new Map(asArray(it['wp:postmeta'] as Record<string, unknown>[]).map((m) => [text(m['wp:meta_key']), text(m['wp:meta_value'])])),
     attachmentUrl: text(it['wp:attachment_url']) || undefined,
+    comments: asArray(it['wp:comment'] as Record<string, unknown>[]).filter((c) => text(c['wp:comment_approved']) === '1').length,
   }));
   return { baseUrl: text(channel['wp:base_site_url']) || text(channel.link), siteTitle: text(channel.title), terms, items };
 }
@@ -376,8 +384,10 @@ function transform(manifest: Manifest, data: ReturnType<typeof parseExport>, rou
     const { fm, body } = frontmatter(item, pt.fields);
     files.set(docFile(item), `---\n${toYaml(fm, { lineWidth: 0 })}---\n\n${body}\n`);
     report.migrated[item.type] = (report.migrated[item.type] ?? 0) + 1;
+    report.comments += item.comments;
     const oldPath = item.link ? new URL(item.link).pathname : '';
     const nextPath = newUrl(item);
+    report.urls.push(nextPath);
     if (oldPath && oldPath !== nextPath) report.urlMismatches.push({ old: oldPath, new: nextPath });
   }
 
@@ -459,13 +469,19 @@ async function main(): Promise<void> {
   config.contactLinks = [];
   await writeAt(configPath, JSON.stringify(config, null, 2) + '\n');
 
-  // WordPress redirects the front page's own slug to `/`. The starter ships `redirects: { '/home': '/' }`; point it at the real slug.
-  if (result.frontPage) {
+  // Redirects, so no old link breaks: the front page's own slug → `/` (WordPress does the same), and every URL that changed.
+  // This script owns the `redirects` object in astro.config.mjs and rewrites it on every run.
+  const redirects: Record<string, string> = {};
+  if (result.frontPage) redirects[`/${result.frontPage.path}`] = '/';
+  const live = new Set(report.urls);
+  for (const m of report.urlMismatches) if (m.old !== '/' && !live.has(m.old)) redirects[m.old] = m.new;
+  if (Object.keys(redirects).length) {
     const astroConfigPath = path.join(ROOT, 'astro.config.mjs');
     const astroConfig = await readFile(astroConfigPath, 'utf8').catch(() => '');
-    const patched = astroConfig.replace(/redirects:\s*\{\s*'\/[^']*':\s*'\/'\s*\}/, `redirects: { '/${result.frontPage.path}': '/' }`);
-    if (patched !== astroConfig) await writeFile(astroConfigPath, patched);
-    else if (!astroConfig.includes(`'/${result.frontPage.path}': '/'`)) report.warnings.push(`Add redirects: { '/${result.frontPage.path}': '/' } to astro.config.mjs`);
+    const literal = `redirects: {${Object.entries(redirects).map(([from, to]) => `\n\t\t${JSON.stringify(from)}: ${JSON.stringify(to)},`).join('')}\n\t}`;
+    const existing = /redirects:\s*\{[^}]*\}/;
+    if (existing.test(astroConfig)) await writeFile(astroConfigPath, astroConfig.replace(existing, literal));
+    else report.warnings.push(`Couldn't find \`redirects\` in astro.config.mjs. Add: ${literal}`);
   }
 
   await writeAt('src/lib/wordpress.json', JSON.stringify({ ...wordpressJson, site: { title: manifest.site.title, tagline: manifest.site.tagline }, frontPage: result.frontPage ?? null, postsPage: result.postsPage ?? null }, null, 2) + '\n');
@@ -474,7 +490,8 @@ async function main(): Promise<void> {
   console.log(`[transform] migrated: ${Object.entries(report.migrated).map(([k, v]) => `${v} ${k}`).join(', ')}`);
   console.log(`[transform] media: ${report.media} files → public/uploads/`);
   if (report.skipped.length) console.log(`[transform] skipped: ${report.skipped.join(', ')}`);
-  for (const m of report.urlMismatches) console.warn(`[transform]   URL CHANGED: ${m.old} → ${m.new} (add a redirect)`);
+  if (report.comments) console.warn(`[transform]   NOT MIGRATED: ${report.comments} approved comments (needs a comments service)`);
+  for (const m of report.urlMismatches) console.warn(`[transform]   URL CHANGED: ${m.old} → ${m.new} (redirect added)`);
   for (const w of report.warnings) console.warn(`[transform]   WARNING: ${w}`);
   console.log('[transform] report written to migration/transform-report.json');
 }
