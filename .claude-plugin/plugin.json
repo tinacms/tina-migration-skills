@@ -1,0 +1,14 @@
+{
+  "name": "tina-migration",
+  "displayName": "TinaCMS Migration",
+  "version": "0.1.0",
+  "description": "Migrate an existing website to TinaCMS. WordPress → TinaCMS on Astro, with an editor that mirrors /wp-admin.",
+  "author": {
+    "name": "TinaCMS",
+    "url": "https://tina.io"
+  },
+  "homepage": "https://github.com/tinacms/tina-migration-skills",
+  "repository": "https://github.com/tinacms/tina-migration-skills",
+  "license": "MIT",
+  "keywords": ["tinacms", "wordpress", "migration", "astro", "cms"]
+}

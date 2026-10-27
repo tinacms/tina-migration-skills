@@ -1,6 +1,7 @@
 ---
 name: wordpress-to-tinacms
-description: Migrate a WordPress website to TinaCMS on Astro, locally, by observing /wp-admin and mirroring its editorial schema. The skill drives a headless browser into /wp-admin, discovers post types / fields / taxonomies / ACF field groups / SEO plugins, generates matching TinaCMS collections, exports and transforms the content, and leaves you with a working local site whose /admin editor matches the WordPress editor the content team already knows.
+description: Migrate a WordPress website to TinaCMS on Astro, locally, by observing /wp-admin and mirroring its editorial schema. The skill drives a headless browser into /wp-admin, discovers post types / fields / taxonomies / ACF field groups / SEO plugins, generates matching TinaCMS collections, exports and transforms the content, and leaves you with a working local site whose /admin editor matches the WordPress editor the content team already knows. Use when the user wants to move, migrate or convert a WordPress site to TinaCMS.
+argument-hint: "[wordpress-site-url]"
 ---
 
 # WordPress → TinaCMS migration (local, /wp-admin-driven)
@@ -9,7 +10,9 @@ You are helping a user replace a WordPress site with a TinaCMS-powered Astro sit
 
 The guiding principle: **the TinaCMS editor should feel like the WordPress editor the team is already using.** You get there by observing `/wp-admin` and mirroring its schema (same post types, same field names, same groupings) before you touch any content.
 
-`SKILL_DIR` below means the folder this `SKILL.md` is in. The steps run three scripts from `SKILL_DIR/scripts/` and copy a few Astro files from `SKILL_DIR/templates/astro/`. Run every command from the new project's root.
+This skill's folder is `${CLAUDE_SKILL_DIR}`. Claude Code fills in that path; in other tools, use the folder this `SKILL.md` is in. The steps copy three scripts from its `scripts/` folder and a few Astro files from `templates/astro/`. Run every command from the new project's root.
+
+WordPress site to migrate, if the user passed one: $ARGUMENTS
 
 ## 0. Before you start
 
@@ -19,7 +22,7 @@ The guiding principle: **the TinaCMS editor should feel like the WordPress edito
 
 ## 1. Discovery
 
-Open `discovery.md` and ask the questions that aren't answered yet. Record the answers in `migration/context.md` once the project exists (step 2).
+Open `discovery.md` and ask the questions that aren't answered yet. If the site URL was passed above or is in the user's message, don't ask for it again. Record the answers in `migration/context.md` once the project exists (step 2).
 
 If `/wp-admin` enforces 2FA or SSO, headless login fails. Ask whether to (a) use a migration account without 2FA, (b) use an app password if the plugin supports it, or (c) run the tour with `HEADLESS=false` so the user completes 2FA in the browser window.
 
@@ -50,7 +53,7 @@ WP_PASSWORD=...
 Install the migration tooling in its own `package.json`, so none of it ends up in the site's dependencies:
 
 ```bash
-cp SKILL_DIR/scripts/*.ts migration/
+cp "${CLAUDE_SKILL_DIR}"/scripts/*.ts migration/
 (cd migration && npm init -y && npm i -D playwright dotenv tsx typescript @types/node fast-xml-parser turndown @types/turndown yaml && npx playwright install chromium)
 ```
 
@@ -123,7 +126,7 @@ The starter's `page` and `blog` collections, routes and visual-editing islands a
 ```bash
 rm -rf src/content/blog src/content/page src/pages/blog src/pages/index.astro 'src/pages/[...slug].astro' src/pages/rss.xml.ts \
   src/components/blocks src/components/islands src/layouts/BlogPost.astro tina/collections/blog.ts tina/collections/page.ts
-cp -R SKILL_DIR/templates/astro/. .
+cp -R "${CLAUDE_SKILL_DIR}"/templates/astro/. .
 node -e 'const f="tsconfig.json",t=JSON.parse(require("fs").readFileSync(f));t.exclude.push("migration");require("fs").writeFileSync(f,JSON.stringify(t,null,2)+"\n")'
 ```
 
