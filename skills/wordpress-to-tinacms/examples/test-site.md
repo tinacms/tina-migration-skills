@@ -43,11 +43,38 @@ ACF tabs are layout only, so they're dropped and the fields sit in one panel.
 
 1. **No generator or transformer existed.** Steps 4 and 8 were prose for the AI to improvise. They're now `generate-collections.ts` and `transform-content.ts`. They are repeatable and use each field's `source` from the tour, so ACF values land in the right group, serialized arrays are decoded and relationships become references.
 2. **The Astro starter changed.** It now reads content through Tina's GraphQL client, not Astro content collections, and it's wired to demo `page`/`blog` collections (block-based pages, islands, RSS). Old step 7 ("update `src/content.config.ts`") was wrong. The skill now swaps the demo model for `templates/astro/`, which has one generic route that serves WordPress URLs.
-3. **pnpm 11 blocks the install** on `workerd`'s build script. Documented: set `workerd: false`.
+3. **pnpm blocks the install** on `workerd`'s build script. Documented: set `workerd: false`.
 4. **The front page needs Settings → Reading,** which the export doesn't carry. The tour now reads Settings → General / Permalinks / Reading.
 5. **ACF true/false saves an unticked box as `''`.** The transformer maps it to `false` instead of dropping it.
 6. **List items showed "Event Types Item".** The generator now adds `itemProps` so lists show the term or first text field.
 7. **`migration/` must be gitignored before anything goes in it.** A premature `git add -A` in this run committed `.env.local` (dummy credentials) to the local pilot history, which had to be rewritten. `SKILL.md` now adds the ignore rule right after scaffolding.
+
+## One-prompt run (plugin 0.2.0)
+
+A fresh agent, with no other context, got this prompt in an empty folder:
+
+> Migrate http://localhost:8080 from WordPress to TinaCMS
+
+A script played the site owner. It filled in `migration/.env.local` 20 seconds after the file appeared.
+
+| | |
+|---|---|
+| Pauses | **1**: waiting for the credentials file. No questions asked |
+| Time | About 6½ minutes from prompt to running site, including scaffolding, installs, the tour and the build |
+| Result | Same counts as above. `check-site.ts`: 13/13 URLs OK. `pnpm dev` left running |
+| Summary | `MIGRATION-SUMMARY.md` with **Needs a decision**: the skipped Kiosk PIN, 1 approved comment, 2 skipped drafts. Then a six-step **Going live** checklist |
+| Credentials | Never in the chat or the logs. `migration/.env.local` is gitignored |
+
+The agent's notes led to three fixes:
+
+- the project folder name drops a port
+- `create-tina-app` already installs dependencies, and can hit the `workerd` snag
+- that snag isn't specific to pnpm 11
+
+Also tested in this round:
+
+- **`--from-export`** on this site's export: the schema matches the observed one, except what an export can't show (a featured image nobody has set yet, the "Team" menu label). Generate, transform and build all pass on it.
+- **Redirects:** with posts moved under `/blog/`, the old URLs answered `301` to the new ones, and `check-site.ts` covered all 16 URLs.
 
 ## Still open
 
