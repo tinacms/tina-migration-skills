@@ -21,7 +21,7 @@
  *   npx tsx migration/wp-admin-tour.ts
  */
 
-import { chromium, Page } from 'playwright';
+import { chromium, type Page } from 'playwright';
 import { readFile, writeFile } from 'node:fs/promises';
 import { config as loadEnv } from 'dotenv';
 import path from 'node:path';
@@ -87,10 +87,20 @@ type PostTypeSchema = {
 
 type Taxonomy = { name: string; label: string; hierarchical: boolean; postTypes: string[] };
 
+type SiteSettings = {
+  title: string;
+  tagline: string;
+  /** Settings → Permalinks, e.g. `/%postname%/`. Empty string = plain `?p=123` links. */
+  permalinkStructure: string;
+  /** Settings → Reading. `page` = a static page is the homepage. */
+  frontPage: { show: 'posts' } | { show: 'page'; pageId: number; postsPageId?: number };
+};
+
 type Manifest = {
   generatedAt: string;
   siteUrl: string;
   wpVersion?: string;
+  site: SiteSettings;
   postTypes: PostTypeSchema[];
   taxonomies: Taxonomy[];
   plugins: { acf: boolean; yoast: boolean; rankMath: boolean; active: string[] };
@@ -144,6 +154,21 @@ async function login(page: Page): Promise<void> {
 async function detectWpVersion(page: Page): Promise<string | undefined> {
   const footer = await page.locator('#footer-upgrade').textContent().catch(() => null);
   return footer?.match(/([\d]+\.[\d.]+)/)?.[1];
+}
+
+/** Settings → General / Permalinks / Reading. Read-only: the forms are never submitted. */
+async function readSiteSettings(page: Page): Promise<SiteSettings> {
+  await page.goto(`${WP_ADMIN_URL}/options-general.php`);
+  const title = await page.inputValue('#blogname');
+  const tagline = await page.inputValue('#blogdescription');
+  await page.goto(`${WP_ADMIN_URL}/options-permalink.php`);
+  const permalinkStructure = await page.inputValue('#permalink_structure').catch(() => '');
+  await page.goto(`${WP_ADMIN_URL}/options-reading.php`);
+  const show = await page.locator('input[name="show_on_front"]:checked').inputValue().catch(() => 'posts');
+  if (show !== 'page') return { title, tagline, permalinkStructure, frontPage: { show: 'posts' } };
+  const pageId = Number(await page.inputValue('#page_on_front'));
+  const postsPageId = Number(await page.inputValue('#page_for_posts').catch(() => '0')) || undefined;
+  return { title, tagline, permalinkStructure, frontPage: { show: 'page', pageId, postsPageId } };
 }
 
 async function detectPlugins(page: Page): Promise<Manifest['plugins']> {
@@ -289,7 +314,8 @@ function acfToTina(f: AcfField, postTypeNames: string[], skipped: string[]): Tin
         fields: [
           { type: 'string', name: 'title', label: 'Link text' },
           { type: 'string', name: 'url', label: 'URL' },
-          { type: 'string', name: 'target', label: 'Target', options: ['', '_blank'] },
+          // WordPress stores '' for "same tab"; the transformer maps it to `_self`.
+          { type: 'string', name: 'target', label: 'Open in', options: [{ value: '_self', label: 'Same tab' }, { value: '_blank', label: 'New tab' }] },
         ],
       };
       break;
@@ -527,6 +553,10 @@ async function main(): Promise<void> {
   const wpVersion = await detectWpVersion(page);
   console.log(`[tour]   WordPress ${wpVersion ?? '(version hidden)'}`);
 
+  console.log('[tour] reading site settings…');
+  const site = await readSiteSettings(page);
+  console.log(`[tour]   "${site.title}", permalinks ${site.permalinkStructure || '(plain)'}, front page: ${site.frontPage.show}`);
+
   console.log('[tour] detecting plugins…');
   const plugins = await detectPlugins(page);
   console.log(`[tour]   ACF: ${plugins.acf}, Yoast: ${plugins.yoast}, Rank Math: ${plugins.rankMath}`);
@@ -558,6 +588,7 @@ async function main(): Promise<void> {
     generatedAt: new Date().toISOString(),
     siteUrl: SITE_URL,
     wpVersion,
+    site,
     postTypes: schemas,
     taxonomies: [...taxonomies.values()],
     plugins,
