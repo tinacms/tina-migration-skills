@@ -15,13 +15,12 @@
  * ACF 6.8 free, Yoast SEO 28.7). Rank Math detection is untested. Run with
  * HEADLESS=false to watch it the first time on a new site.
  *
- * Usage (from the migration working directory):
- *   npm i -D playwright dotenv @types/node typescript tsx
- *   npx playwright install chromium
- *   npx tsx migration/wp-admin-tour.ts
+ * Usage (from the project root):
+ *   migration/node_modules/.bin/tsx migration/wp-admin-tour.ts --check   # login + permissions only, writes nothing
+ *   migration/node_modules/.bin/tsx migration/wp-admin-tour.ts           # full tour
  */
 
-import { chromium, Page } from 'playwright';
+import { chromium, type Page } from 'playwright';
 import { readFile, writeFile } from 'node:fs/promises';
 import { config as loadEnv } from 'dotenv';
 import path from 'node:path';
@@ -33,6 +32,7 @@ const WP_ADMIN_URL = process.env.WP_ADMIN_URL?.replace(/\/$/, '');
 const WP_USERNAME = process.env.WP_USERNAME;
 const WP_PASSWORD = process.env.WP_PASSWORD;
 const HEADLESS = process.env.HEADLESS !== 'false';
+const CHECK_ONLY = process.argv.includes('--check');
 
 if (!WP_ADMIN_URL || !WP_USERNAME || !WP_PASSWORD) {
   throw new Error('Missing WP_ADMIN_URL / WP_USERNAME / WP_PASSWORD in migration/.env.local');
@@ -87,10 +87,20 @@ type PostTypeSchema = {
 
 type Taxonomy = { name: string; label: string; hierarchical: boolean; postTypes: string[] };
 
+type SiteSettings = {
+  title: string;
+  tagline: string;
+  /** Settings → Permalinks, e.g. `/%postname%/`. Empty string = plain `?p=123` links. */
+  permalinkStructure: string;
+  /** Settings → Reading. `page` = a static page is the homepage. */
+  frontPage: { show: 'posts' } | { show: 'page'; pageId: number; postsPageId?: number };
+};
+
 type Manifest = {
   generatedAt: string;
   siteUrl: string;
   wpVersion?: string;
+  site: SiteSettings;
   postTypes: PostTypeSchema[];
   taxonomies: Taxonomy[];
   plugins: { acf: boolean; yoast: boolean; rankMath: boolean; active: string[] };
@@ -141,9 +151,48 @@ async function login(page: Page): Promise<void> {
   }
 }
 
+/**
+ * Admin screens the tour needs. Each is only in the admin menu when the account can use it,
+ * so an Editor login (which can sign in fine) is caught here instead of halfway through the tour.
+ */
+const REQUIRED_SCREENS = [
+  { href: 'plugins.php', needFor: 'plugin detection' },
+  { href: 'export.php', needFor: 'the content export' },
+  { href: 'options-general.php', needFor: 'site settings' },
+];
+
+/** Fail fast unless the account can open every screen the tour needs. `--check` stops after this. */
+async function checkAccess(page: Page): Promise<void> {
+  const missing = [];
+  for (const screen of REQUIRED_SCREENS) {
+    if ((await page.locator(`#adminmenu a[href$="${screen.href}"]`).count()) === 0) missing.push(screen);
+  }
+  if (missing.length) {
+    throw new Error(
+      `Logged in, but this account can't open ${missing.map((m) => `${m.href} (needed for ${m.needFor})`).join(', ')}. ` +
+        'Use an Administrator account for the migration.'
+    );
+  }
+}
+
 async function detectWpVersion(page: Page): Promise<string | undefined> {
   const footer = await page.locator('#footer-upgrade').textContent().catch(() => null);
   return footer?.match(/([\d]+\.[\d.]+)/)?.[1];
+}
+
+/** Settings → General / Permalinks / Reading. Read-only: the forms are never submitted. */
+async function readSiteSettings(page: Page): Promise<SiteSettings> {
+  await page.goto(`${WP_ADMIN_URL}/options-general.php`);
+  const title = await page.inputValue('#blogname');
+  const tagline = await page.inputValue('#blogdescription');
+  await page.goto(`${WP_ADMIN_URL}/options-permalink.php`);
+  const permalinkStructure = await page.inputValue('#permalink_structure').catch(() => '');
+  await page.goto(`${WP_ADMIN_URL}/options-reading.php`);
+  const show = await page.locator('input[name="show_on_front"]:checked').inputValue().catch(() => 'posts');
+  if (show !== 'page') return { title, tagline, permalinkStructure, frontPage: { show: 'posts' } };
+  const pageId = Number(await page.inputValue('#page_on_front'));
+  const postsPageId = Number(await page.inputValue('#page_for_posts').catch(() => '0')) || undefined;
+  return { title, tagline, permalinkStructure, frontPage: { show: 'page', pageId, postsPageId } };
 }
 
 async function detectPlugins(page: Page): Promise<Manifest['plugins']> {
@@ -289,7 +338,8 @@ function acfToTina(f: AcfField, postTypeNames: string[], skipped: string[]): Tin
         fields: [
           { type: 'string', name: 'title', label: 'Link text' },
           { type: 'string', name: 'url', label: 'URL' },
-          { type: 'string', name: 'target', label: 'Target', options: ['', '_blank'] },
+          // WordPress stores '' for "same tab"; the transformer maps it to `_self`.
+          { type: 'string', name: 'target', label: 'Open in', options: [{ value: '_self', label: 'Same tab' }, { value: '_blank', label: 'New tab' }] },
         ],
       };
       break;
@@ -527,6 +577,17 @@ async function main(): Promise<void> {
   const wpVersion = await detectWpVersion(page);
   console.log(`[tour]   WordPress ${wpVersion ?? '(version hidden)'}`);
 
+  await checkAccess(page);
+  if (CHECK_ONLY) {
+    await browser.close();
+    console.log('[tour] check passed: login works and the account is an administrator. Nothing was written.');
+    return;
+  }
+
+  console.log('[tour] reading site settings…');
+  const site = await readSiteSettings(page);
+  console.log(`[tour]   "${site.title}", permalinks ${site.permalinkStructure || '(plain)'}, front page: ${site.frontPage.show}`);
+
   console.log('[tour] detecting plugins…');
   const plugins = await detectPlugins(page);
   console.log(`[tour]   ACF: ${plugins.acf}, Yoast: ${plugins.yoast}, Rank Math: ${plugins.rankMath}`);
@@ -558,6 +619,7 @@ async function main(): Promise<void> {
     generatedAt: new Date().toISOString(),
     siteUrl: SITE_URL,
     wpVersion,
+    site,
     postTypes: schemas,
     taxonomies: [...taxonomies.values()],
     plugins,

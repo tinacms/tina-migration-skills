@@ -1,0 +1,32 @@
+---
+/**
+ * One route for everything migrated from WordPress: single entries, the
+ * homepage, the posts page, CPT archives and taxonomy term pages. URLs follow
+ * the WordPress permalinks (see src/lib/wordpress.json).
+ */
+import Base from '../layouts/Base.astro';
+import Entry from '../components/wordpress/Entry.astro';
+import EntryList from '../components/wordpress/EntryList.astro';
+import { loadSite, site } from '../lib/wordpress-content';
+
+export async function getStaticPaths() {
+	const { routes } = await loadSite();
+	return routes.map((r) => ({ params: { path: r.url.replace(/^\/|\/$/g, '') || undefined } }));
+}
+
+// Load fresh on every render (getStaticPaths results are cached in dev).
+const url = `/${Astro.params.path ? `${Astro.params.path}/` : ''}`;
+const { routes, byFile } = await loadSite();
+const route = routes.find((r) => r.url === url);
+if (!route) return new Response('Not Found', { status: 404 });
+
+const doc = route.doc;
+const seo = doc?.values.seo ?? {};
+const title = seo.title || (doc && url !== '/' ? `${doc.title} - ${site.title}` : site.title);
+const description = seo.description || doc?.values.excerpt || site.tagline || site.title;
+---
+
+<Base title={title} description={description} image={seo.og_image || doc?.values.featured_image}>
+	{doc && <Entry doc={doc} byFile={byFile} />}
+	{route.listing && <EntryList listing={route.listing} />}
+</Base>
