@@ -15,9 +15,16 @@
  * ACF 6.8 free, Yoast SEO 28.7). Rank Math detection is untested. Run with
  * HEADLESS=false to watch it the first time on a new site.
  *
+ * No Administrator login? `--from-export` projects schema.json from an
+ * export file someone else downloaded (Tools → Export → All content), saved
+ * as migration/wp-export.xml, plus ACF's own JSON export if there is one
+ * (migration/acf-field-groups.json). No browser, no credentials. The result
+ * is a guess from stored values, not an observation of the editor.
+ *
  * Usage (from the project root):
- *   migration/node_modules/.bin/tsx migration/wp-admin-tour.ts --check   # login + permissions only, writes nothing
- *   migration/node_modules/.bin/tsx migration/wp-admin-tour.ts           # full tour
+ *   migration/node_modules/.bin/tsx migration/wp-admin-tour.ts --check         # login + permissions only, writes nothing
+ *   migration/node_modules/.bin/tsx migration/wp-admin-tour.ts                 # full tour
+ *   migration/node_modules/.bin/tsx migration/wp-admin-tour.ts --from-export   # no login: schema from wp-export.xml
  */
 
 import { chromium, type Page } from 'playwright';
@@ -33,12 +40,13 @@ const WP_USERNAME = process.env.WP_USERNAME;
 const WP_PASSWORD = process.env.WP_PASSWORD;
 const HEADLESS = process.env.HEADLESS !== 'false';
 const CHECK_ONLY = process.argv.includes('--check');
+const FROM_EXPORT = process.argv.includes('--from-export');
 
-if (!WP_ADMIN_URL || !WP_USERNAME || !WP_PASSWORD) {
+if (!FROM_EXPORT && (!WP_ADMIN_URL || !WP_USERNAME || !WP_PASSWORD)) {
   throw new Error('Missing WP_ADMIN_URL / WP_USERNAME / WP_PASSWORD in migration/.env.local');
 }
 
-const SITE_URL = WP_ADMIN_URL.replace(/\/wp-admin$/, '');
+const SITE_URL = (WP_ADMIN_URL ?? '').replace(/\/wp-admin$/, '');
 
 // Post types that are WordPress or plugin internals, not editorial content.
 const INTERNAL_POST_TYPES = new Set([
@@ -98,6 +106,8 @@ type SiteSettings = {
 
 type Manifest = {
   generatedAt: string;
+  /** Set when the schema was projected from an export file instead of observed in /wp-admin. */
+  derivedFrom?: 'export';
   siteUrl: string;
   wpVersion?: string;
   site: SiteSettings;
@@ -197,9 +207,10 @@ async function readSiteSettings(page: Page): Promise<SiteSettings> {
 
 async function detectPlugins(page: Page): Promise<Manifest['plugins']> {
   await page.goto(`${WP_ADMIN_URL}/plugins.php?plugin_status=active`);
-  const active = await page.$$eval('tr.active[data-slug]', (rows) =>
+  // A plugin with an update waiting gets a second row (the notice) with the same slug.
+  const active = [...new Set(await page.$$eval('tr.active[data-slug]:not(.plugin-update-tr)', (rows) =>
     rows.map((r) => r.getAttribute('data-slug')!).filter(Boolean)
-  );
+  ))];
   return {
     acf: active.some((p) => /^advanced-custom-fields/.test(p)),
     yoast: active.includes('wordpress-seo') || active.includes('wordpress-seo-premium'),
@@ -567,7 +578,163 @@ async function exportContent(page: Page): Promise<void> {
   await download.saveAs(path.join(MIGRATION_DIR, 'wp-export.xml'));
 }
 
+async function writeManifest(manifest: Manifest, skipped: string[]): Promise<void> {
+  const outPath = path.join(MIGRATION_DIR, 'schema.json');
+  await writeFile(outPath, JSON.stringify(manifest, null, 2) + '\n');
+  console.log(`[tour] schema written to ${outPath}`);
+  for (const s of manifest.postTypes) {
+    for (const m of s.unmapped) console.warn(`[tour]   UNMAPPED on ${s.name}: metabox "${m.title}" (#${m.id})`);
+  }
+  for (const s of new Set(skipped)) console.warn(`[tour]   SKIPPED field: ${s}`);
+}
+
+// ---------------------------------------------------------------------------
+// --from-export: no admin login, so project the schema from stored values
+// ---------------------------------------------------------------------------
+
+// Post types an export carries that aren't editorial content.
+const EXPORT_SKIP_TYPES = new Set([
+  ...INTERNAL_POST_TYPES, 'acf-field', 'nav_menu_item', 'revision', 'custom_css', 'customize_changeset', 'oembed_cache', 'user_request', 'wp_global_styles',
+]);
+
+/** `event_type` → `Event Types`. The export has no labels, so build one from the slug. */
+const labelFor = (slug: string) => {
+  const known: Record<string, string> = { post: 'Posts', page: 'Pages', category: 'Categories', post_tag: 'Tags' };
+  if (known[slug]) return known[slug];
+  const words = slug.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  return /s$/.test(words) ? words : words.replace(/y$/, 'ie') + 's';
+};
+
+/** Settings → Permalinks isn't exported, so read it off a published post's URL. */
+function guessPermalinkStructure(postLinks: string[], home: string): string {
+  const link = postLinks[0];
+  if (!link) return '/%postname%/';
+  if (/[?&]p=\d+/.test(link)) return '';
+  const rel = link.replace(home, '');
+  if (/^\/\d{4}\/\d{2}\/\d{2}\/[^/]+\/?$/.test(rel)) return '/%year%/%monthnum%/%day%/%postname%/';
+  if (/^\/\d{4}\/\d{2}\/[^/]+\/?$/.test(rel)) return '/%year%/%monthnum%/%postname%/';
+  return '/%postname%/';
+}
+
+async function schemaFromExport(): Promise<void> {
+  const { XMLParser } = await import('fast-xml-parser');
+  const xml = await readFile(path.join(MIGRATION_DIR, 'wp-export.xml'), 'utf8').catch(() => {
+    throw new Error('migration/wp-export.xml not found. Save the Tools → Export → All content file there first.');
+  });
+  const asArray = <T>(x: T | T[] | undefined): T[] => (x === undefined ? [] : Array.isArray(x) ? x : [x]);
+  const text = (x: unknown): string => (x === undefined || x === null ? '' : typeof x === 'object' ? String((x as Record<string, unknown>)['#text'] ?? '') : String(x));
+  const channel = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_', parseTagValue: false, trimValues: false }).parse(xml).rss.channel;
+
+  // ACF → Tools → Export As JSON is an array; a theme's acf-json/ file is one group.
+  const acfJson = await readFile(path.join(MIGRATION_DIR, 'acf-field-groups.json'), 'utf8').then(JSON.parse).catch(() => []);
+  const acfGroups = (asArray(acfJson) as AcfFieldGroup[]).filter((g) => g.active !== false && g.active !== 0);
+
+  const items = asArray(channel.item as Record<string, unknown>[]).map((it) => ({
+    id: Number(text(it['wp:post_id'])),
+    type: text(it['wp:post_type']),
+    status: text(it['wp:status']),
+    link: text(it.link),
+    content: text(it['content:encoded']),
+    excerpt: text(it['excerpt:encoded']),
+    taxonomies: asArray(it.category as Record<string, string>[]).map((c) => c['@_domain']),
+    meta: new Map(asArray(it['wp:postmeta'] as Record<string, unknown>[]).map((m) => [text(m['wp:meta_key']), text(m['wp:meta_value'])])),
+  }));
+  const content = items.filter((i) => !EXPORT_SKIP_TYPES.has(i.type) && !['auto-draft', 'inherit', 'trash'].includes(i.status));
+  const metaKeys = (i: (typeof items)[number]) => [...i.meta.keys()];
+  const hasMeta = (re: RegExp) => content.some((i) => metaKeys(i).some((k) => re.test(k)));
+
+  const home = (text(channel.link) || text(channel['wp:base_site_url'])).replace(/\/$/, '');
+  const frontPage = content.find((i) => i.type === 'page' && i.status === 'publish' && i.link.replace(/\/$/, '') === home);
+  const site: SiteSettings = {
+    title: text(channel.title),
+    tagline: text(channel.description),
+    permalinkStructure: guessPermalinkStructure(content.filter((i) => i.type === 'post' && i.status === 'publish').map((i) => i.link), home),
+    frontPage: frontPage ? { show: 'page', pageId: frontPage.id } : { show: 'posts' },
+  };
+  // Settings → Reading is public in the REST API index on current WordPress. Use it when the site answers.
+  const index = await fetch(`${home}/wp-json/`, { signal: AbortSignal.timeout(10_000) }).then((r) => (r.ok ? r.json() : undefined)).catch(() => undefined);
+  if (index?.show_on_front === 'page' && index.page_on_front) {
+    site.frontPage = { show: 'page', pageId: Number(index.page_on_front), postsPageId: Number(index.page_for_posts) || undefined };
+  } else if (index?.show_on_front === 'posts') {
+    site.frontPage = { show: 'posts' };
+  }
+  // ACF saves `_<field name>` = `field_…` next to each value.
+  const acfNamesIn = (i: (typeof items)[number]) => [...i.meta].filter(([k, v]) => k.startsWith('_') && v.startsWith('field_')).map(([k]) => k.slice(1));
+  const plugins: Manifest['plugins'] = {
+    acf: acfGroups.length > 0 || content.some((i) => acfNamesIn(i).length > 0),
+    yoast: hasMeta(/^_yoast_wpseo_/),
+    rankMath: hasMeta(/^rank_math_/),
+    active: [],
+  };
+  for (const g of acfGroups) {
+    if (acfGroupPostTypes(g).size === 0) console.warn(`[tour]   ACF group "${g.title}" isn't tied to a post type (template or options-page rule?). Add it to the right post type in schema.json by hand.`);
+  }
+
+  const termParents = new Map<string, boolean>(); // taxonomy → any term has a parent
+  for (const t of asArray(channel['wp:term'] as Record<string, unknown>[])) {
+    const tax = text(t['wp:term_taxonomy']);
+    termParents.set(tax, termParents.get(tax) || !!text(t['wp:term_parent']));
+  }
+
+  const postTypeNames = [...new Set(content.map((i) => i.type))];
+  const skipped: string[] = [];
+  const ctx = { acfGroups, plugins, postTypeNames, skipped };
+  const schemas: PostTypeSchema[] = [];
+  const taxonomies = new Map<string, Taxonomy>();
+  for (const name of postTypeNames) {
+    const own = content.filter((i) => i.type === name);
+    const taxNames = [...new Set(own.flatMap((i) => i.taxonomies))].filter((t) => t && !INTERNAL_TAXONOMIES.has(t));
+    const taxList = taxNames.map((t) => ({ name: t, label: labelFor(t), hierarchical: t === 'category' || (t !== 'post_tag' && !!termParents.get(t)) }));
+    // Stand-ins for the metaboxes the tour would have seen, so buildPostTypeSchema treats both modes alike.
+    const metaboxes: ScreenInfo['metaboxes'] = [];
+    if (own.some((i) => metaKeys(i).some((k) => k.startsWith('_yoast_wpseo_')))) metaboxes.push({ id: 'wpseo_meta', title: 'Yoast SEO' });
+    if (own.some((i) => metaKeys(i).some((k) => k.startsWith('rank_math_')))) metaboxes.push({ id: 'rank_math_metabox', title: 'Rank Math SEO' });
+    // Without the field group definitions, ACF values can't be typed.
+    const acfNames = [...new Set(own.flatMap(acfNamesIn))];
+    if (acfNames.length && !acfGroups.some((g) => acfGroupPostTypes(g).has(name))) {
+      metaboxes.push({ id: 'acf', title: `ACF fields without definitions (${acfNames.join(', ')}). Save ACF → Tools → Export As JSON, or the theme's acf-json/ files, as migration/acf-field-groups.json and run again` });
+    }
+    // Plain custom fields (no leading underscore, not ACF): WordPress's own Custom Fields box, or a plugin's.
+    // `footnotes` is the block editor's footnotes block, already part of the body.
+    for (const key of new Set(own.flatMap(metaKeys))) {
+      if (key === 'footnotes' || key.startsWith('_') || key.startsWith('rank_math_')) continue;
+      if (!acfNames.includes(key) && !acfNames.some((a) => key.startsWith(`${a}_`))) {
+        metaboxes.push({ id: `custom-field-${key}`, title: `Custom field "${key}"` });
+      }
+    }
+    const screen: ScreenInfo = {
+      editor: own.some((i) => i.content.includes('<!-- wp:')) ? 'block' : 'classic',
+      supports: {
+        title: true,
+        editor: name === 'post' || name === 'page' || own.some((i) => i.content.trim()),
+        excerpt: name === 'post' || own.some((i) => i.excerpt.trim()),
+        thumbnail: own.some((i) => i.meta.has('_thumbnail_id')),
+      },
+      taxonomies: taxList,
+      metaboxes,
+    };
+    schemas.push(buildPostTypeSchema({ name, label: labelFor(name) }, screen, ctx));
+    for (const t of taxList) {
+      const existing = taxonomies.get(t.name) ?? { ...t, postTypes: [] };
+      existing.postTypes.push(name);
+      taxonomies.set(t.name, existing);
+    }
+  }
+
+  console.log(`[tour] read the export: "${site.title}", ${postTypeNames.length} post types (${postTypeNames.join(', ')}), ${acfGroups.length} ACF field groups`);
+  console.log(`[tour]   permalinks guessed as ${site.permalinkStructure || '(plain)'}, front page: ${site.frontPage.show}`);
+  if (site.frontPage.show === 'page' && !site.frontPage.postsPageId) {
+    console.warn('[tour]   couldn\'t tell which page lists the posts. Set site.frontPage.postsPageId in schema.json if there is one.');
+  }
+  await writeManifest(
+    { generatedAt: new Date().toISOString(), derivedFrom: 'export', siteUrl: home, wpVersion: text(channel.generator).match(/v=([\d.]+)/)?.[1], site, postTypes: schemas, taxonomies: [...taxonomies.values()], plugins },
+    skipped
+  );
+}
+
 async function main(): Promise<void> {
+  if (FROM_EXPORT) return schemaFromExport();
+
   const browser = await chromium.launch({ headless: HEADLESS });
   const context = await browser.newContext({ acceptDownloads: true });
   const page = await context.newPage();
@@ -615,23 +782,10 @@ async function main(): Promise<void> {
     }
   }
 
-  const manifest: Manifest = {
-    generatedAt: new Date().toISOString(),
-    siteUrl: SITE_URL,
-    wpVersion,
-    site,
-    postTypes: schemas,
-    taxonomies: [...taxonomies.values()],
-    plugins,
-  };
-  const outPath = path.join(MIGRATION_DIR, 'schema.json');
-  await writeFile(outPath, JSON.stringify(manifest, null, 2) + '\n');
-  console.log(`[tour] schema written to ${outPath}`);
-
-  for (const s of schemas) {
-    for (const m of s.unmapped) console.warn(`[tour]   UNMAPPED on ${s.name}: metabox "${m.title}" (#${m.id})`);
-  }
-  for (const s of new Set(skipped)) console.warn(`[tour]   SKIPPED field: ${s}`);
+  await writeManifest(
+    { generatedAt: new Date().toISOString(), siteUrl: SITE_URL, wpVersion, site, postTypes: schemas, taxonomies: [...taxonomies.values()], plugins },
+    skipped
+  );
 
   console.log('[tour] exporting content…');
   try {
