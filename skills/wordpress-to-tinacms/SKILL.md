@@ -35,19 +35,9 @@ Do the `.gitignore` step **before** creating anything in `migration/`, so creden
 
 Use Astro by default. Use `tina-nextjs-starter` only if discovery found app-like features (accounts, dashboards, cart/checkout), and say why.
 
-Then install:
+Don't install the site's dependencies yet. First prove the WordPress login works (step 3).
 
-```bash
-pnpm install
-```
-
-Known starter snags:
-
-- **pnpm 11** stops with `ERR_PNPM_IGNORED_BUILDS` for `workerd` and writes `workerd: set this to true or false` into `pnpm-workspace.yaml`. Set it to `false` (only Cloudflare deploys need it) and run `pnpm install` again.
-- **Node:** the starter pins `engines.node >=22.22.0`. Older 22.x versions work with an engine warning. Upgrade Node if the user prefers.
-- **"This project is configured to use yarn"**: a `packageManager` field in a parent folder's `package.json` (e.g. `~/package.json`). Run pnpm with `COREPACK_ENABLE_STRICT=0`.
-
-## 3. Credentials and migration tooling
+## 3. Credentials, migration tooling and a login check
 
 Ask the user to create `migration/.env.local`:
 
@@ -65,6 +55,32 @@ cp SKILL_DIR/scripts/*.ts migration/
 ```
 
 Every script below runs from the project root as `migration/node_modules/.bin/tsx migration/<script>.ts`.
+
+**Check the login before anything else:**
+
+```bash
+migration/node_modules/.bin/tsx migration/wp-admin-tour.ts --check
+```
+
+It logs in, confirms the account can open Plugins, Tools → Export and Settings (the screens the tour needs), and stops. It writes nothing. If it fails:
+
+| Message | Fix |
+|---|---|
+| `Login rejected` | Wrong username or password, or 2FA. See step 1 for the 2FA options |
+| `Logged in but no admin menu` | A firewall, SSO page or security plugin is in the way. Try `HEADLESS=false`, or see `admin-tour.md` |
+| `this account can't open …` | Not an Administrator. Ask for an Administrator account (an Editor can't export) |
+
+Don't go on until the check passes. Then install the site:
+
+```bash
+pnpm install
+```
+
+Known starter snags:
+
+- **pnpm 11** stops with `ERR_PNPM_IGNORED_BUILDS` for `workerd` and writes `workerd: set this to true or false` into `pnpm-workspace.yaml`. Set it to `false` (only Cloudflare deploys need it) and run `pnpm install` again.
+- **Node:** the starter pins `engines.node >=22.22.0`. Older 22.x versions work with an engine warning. Upgrade Node if the user prefers.
+- **"This project is configured to use yarn"**: a `packageManager` field in a parent folder's `package.json` (e.g. `~/package.json`). Run pnpm with `COREPACK_ENABLE_STRICT=0`.
 
 ## 4. Tour /wp-admin
 

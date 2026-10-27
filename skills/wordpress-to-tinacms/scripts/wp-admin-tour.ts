@@ -15,10 +15,9 @@
  * ACF 6.8 free, Yoast SEO 28.7). Rank Math detection is untested. Run with
  * HEADLESS=false to watch it the first time on a new site.
  *
- * Usage (from the migration working directory):
- *   npm i -D playwright dotenv @types/node typescript tsx
- *   npx playwright install chromium
- *   npx tsx migration/wp-admin-tour.ts
+ * Usage (from the project root):
+ *   migration/node_modules/.bin/tsx migration/wp-admin-tour.ts --check   # login + permissions only, writes nothing
+ *   migration/node_modules/.bin/tsx migration/wp-admin-tour.ts           # full tour
  */
 
 import { chromium, type Page } from 'playwright';
@@ -33,6 +32,7 @@ const WP_ADMIN_URL = process.env.WP_ADMIN_URL?.replace(/\/$/, '');
 const WP_USERNAME = process.env.WP_USERNAME;
 const WP_PASSWORD = process.env.WP_PASSWORD;
 const HEADLESS = process.env.HEADLESS !== 'false';
+const CHECK_ONLY = process.argv.includes('--check');
 
 if (!WP_ADMIN_URL || !WP_USERNAME || !WP_PASSWORD) {
   throw new Error('Missing WP_ADMIN_URL / WP_USERNAME / WP_PASSWORD in migration/.env.local');
@@ -148,6 +148,30 @@ async function login(page: Page): Promise<void> {
   await page.goto(`${WP_ADMIN_URL}/`);
   if ((await page.locator('#adminmenu').count()) === 0) {
     throw new Error(`Logged in but no admin menu at ${page.url()} — WAF or SSO in the way?`);
+  }
+}
+
+/**
+ * Admin screens the tour needs. Each is only in the admin menu when the account can use it,
+ * so an Editor login (which can sign in fine) is caught here instead of halfway through the tour.
+ */
+const REQUIRED_SCREENS = [
+  { href: 'plugins.php', needFor: 'plugin detection' },
+  { href: 'export.php', needFor: 'the content export' },
+  { href: 'options-general.php', needFor: 'site settings' },
+];
+
+/** Fail fast unless the account can open every screen the tour needs. `--check` stops after this. */
+async function checkAccess(page: Page): Promise<void> {
+  const missing = [];
+  for (const screen of REQUIRED_SCREENS) {
+    if ((await page.locator(`#adminmenu a[href$="${screen.href}"]`).count()) === 0) missing.push(screen);
+  }
+  if (missing.length) {
+    throw new Error(
+      `Logged in, but this account can't open ${missing.map((m) => `${m.href} (needed for ${m.needFor})`).join(', ')}. ` +
+        'Use an Administrator account for the migration.'
+    );
   }
 }
 
@@ -552,6 +576,13 @@ async function main(): Promise<void> {
   await login(page);
   const wpVersion = await detectWpVersion(page);
   console.log(`[tour]   WordPress ${wpVersion ?? '(version hidden)'}`);
+
+  await checkAccess(page);
+  if (CHECK_ONLY) {
+    await browser.close();
+    console.log('[tour] check passed: login works and the account is an administrator. Nothing was written.');
+    return;
+  }
 
   console.log('[tour] reading site settings…');
   const site = await readSiteSettings(page);

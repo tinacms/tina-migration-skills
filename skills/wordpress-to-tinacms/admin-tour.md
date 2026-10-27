@@ -8,7 +8,7 @@ Driven by Playwright. Reference implementation in `scripts/wp-admin-tour.ts`.
 
 For a given `/wp-admin` login, in order:
 
-1. **Login.** Fill in `wp-login.php` with the credentials from `.env.local`. Fail fast on `#login_error` or a missing admin menu (WAF/SSO).
+1. **Login and access check.** Fill in `wp-login.php` with the credentials from `.env.local`. Fail fast on `#login_error`, a missing admin menu (WAF/SSO), or an account that can't open Plugins, Tools → Export and Settings (not an Administrator). `--check` stops here and writes nothing, so run it before setting up anything else.
 2. **Read site settings.** The site title and tagline (Settings → General), the permalink structure (Settings → Permalinks), and whether the homepage is the latest posts or a static page, plus which page is the posts page (Settings → Reading). The export doesn't include these, and the routes need them. Forms are read, never submitted.
 3. **Detect plugins** from **Plugins → Active**: ACF (free or Pro), Yoast SEO, Rank Math. The full active-plugin slug list goes into the manifest too.
 4. **Enumerate post types** from the top-level admin menu (`edit.php?post_type=…` links). WordPress and ACF internals (`attachment`, `wp_block`, `acf-field-group`, …) are skipped.
@@ -101,6 +101,7 @@ Commit the new detection block back to this skill repo so the next migration ben
 | Failure | Likely cause | Fix |
 |---|---|---|
 | `wp-login.php` returns 403 | WAF blocking headless Chromium | Switch to `headless: false` or add real user-agent |
+| `this account can't open plugins.php …` | The account isn't an Administrator (e.g. Editor) | Ask for an Administrator account. Editors can't see Plugins, Export or Settings |
 | Login succeeds but Add New screens 404 | Permalinks not set to pretty URLs | Use the `?post_type=<slug>&p=new` fallback URL |
 | `ACF is active but the export tool lists no field groups` | Field groups registered in PHP (`acf_add_local_field_group`) or only in the theme's `acf-json/` folder | Ask the user for the theme's `acf-json/` folder (same JSON format) and drop the files into `migration/acf-field-groups.json` |
 | A metabox appears under `unmapped` | A plugin or theme added fields the tour doesn't know | Ask the user what it holds. If it matters, add a detection block (below) |
