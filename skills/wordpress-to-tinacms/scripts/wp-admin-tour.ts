@@ -448,6 +448,29 @@ const CORE_METABOXES = new Set([
   'commentsdiv', 'postcustom', 'trackbacksdiv', 'revisionsdiv', 'pageparentdiv', 'formatdiv',
 ]);
 
+// Field names the templates and the generators give a meaning to. An ACF group can't use them.
+const RESERVED_FIELD_NAMES = ['title', 'date', 'excerpt', 'featured_image', 'seo', 'body'];
+const renamedGroups = new Set<string>();
+const fieldNameCollisions: string[] = [];
+
+/**
+ * Field name for an ACF group. Titles can differ only in punctuation ("Event Details",
+ * "Event-Details"), so any name that clashes takes a suffix from the group's key.
+ * Every group in a clash is renamed, so the names don't depend on the order ACF lists them.
+ */
+function allocateGroupName(group: AcfFieldGroup, acfGroups: AcfFieldGroup[], taken: Set<string>, postType: string): string | undefined {
+  const base = toTinaName(group.title);
+  const clashes = !base || taken.has(base) || acfGroups.some((g) => g.key !== group.key && toTinaName(g.title) === base);
+  if (!clashes) return base;
+  const name = [base || 'acf', toTinaName(group.key.replace(/^group_/, ''))].filter(Boolean).join('_');
+  if (taken.has(name)) {
+    fieldNameCollisions.push(`${postType}: ACF group "${group.title}" (${group.key}) needs the field name "${name}", which is already used`);
+    return undefined;
+  }
+  renamedGroups.add(`"${group.title}" (${group.key}) → ${name}`);
+  return name;
+}
+
 function buildPostTypeSchema(
   pt: { name: string; label: string },
   screen: ScreenInfo,
@@ -477,6 +500,7 @@ function buildPostTypeSchema(
 
   // ACF: one Tina object per field group, mirroring the metabox the editor sees.
   const onScreen = new Set(screen.metaboxes.map((m) => m.id));
+  const taken = new Set([...RESERVED_FIELD_NAMES, ...fields.map((f) => f.name)]);
   for (const group of ctx.acfGroups) {
     if (!onScreen.has(`acf-${group.key}`) && !acfGroupPostTypes(group).has(pt.name)) continue;
     handled.add(`acf-${group.key}`);
@@ -484,7 +508,10 @@ function buildPostTypeSchema(
       .map((f) => acfToTina(f, ctx.postTypeNames, ctx.skipped))
       .filter((x): x is TinaField => !!x);
     if (groupFields.length === 0) continue;
-    fields.push({ type: 'object', name: toTinaName(group.title), label: group.title, fields: groupFields, source: { kind: 'acf-group', key: group.key } });
+    const name = allocateGroupName(group, ctx.acfGroups, taken, pt.name);
+    if (!name) continue;
+    taken.add(name);
+    fields.push({ type: 'object', name, label: group.title, fields: groupFields, source: { kind: 'acf-group', key: group.key } });
   }
 
   // SEO plugin metabox → single `seo` object.
@@ -562,6 +589,10 @@ async function main(): Promise<void> {
     taxonomies: [...taxonomies.values()],
     plugins,
   };
+  // No schema.json means nothing downstream can run on names that would overwrite each other.
+  if (fieldNameCollisions.length) {
+    throw new Error(`Field name collisions, schema.json not written. Rename or re-key these ACF groups, then run the tour again:\n  ${[...new Set(fieldNameCollisions)].join('\n  ')}`);
+  }
   const outPath = path.join(MIGRATION_DIR, 'schema.json');
   await writeFile(outPath, JSON.stringify(manifest, null, 2) + '\n');
   console.log(`[tour] schema written to ${outPath}`);
@@ -570,6 +601,7 @@ async function main(): Promise<void> {
     for (const m of s.unmapped) console.warn(`[tour]   UNMAPPED on ${s.name}: metabox "${m.title}" (#${m.id})`);
   }
   for (const s of new Set(skipped)) console.warn(`[tour]   SKIPPED field: ${s}`);
+  for (const r of renamedGroups) console.warn(`[tour]   RENAMED ACF group, its name clashed: ${r}`);
 
   console.log('[tour] exporting content…');
   try {
