@@ -38,7 +38,7 @@ type Manifest = {
   siteUrl: string;
   site: { title: string; tagline: string; frontPage: { show: 'posts' } | { show: 'page'; pageId: number; postsPageId?: number } };
   postTypes: { name: string; fields: Field[] }[];
-  taxonomies: { name: string; hierarchical: boolean }[];
+  taxonomies: { name: string; hierarchical: boolean; rewrite?: { base: string; hierarchical: boolean }; termUrls?: Record<string, string> }[];
 };
 type RouteRule = { kind: string; pattern: string };
 
@@ -219,7 +219,19 @@ function transform(manifest: Manifest, data: ReturnType<typeof parseExport>, rou
     return item.slug;
   };
   const docFile = (item: Item) => `src/content/${toTinaName(item.type)}/${docPath(item)}.mdx`;
-  const termFile = (t: { taxonomy: string; slug: string }) => `src/content/${taxonomyCollection(t.taxonomy)}/${t.slug}.json`;
+  const taxonomyOf = new Map(manifest.taxonomies.map((t) => [t.name, t]));
+  const termByKey = new Map(data.terms.map((t) => [`${t.taxonomy}/${t.slug}`, t]));
+  const parentOf = (t: (typeof data.terms)[number]) => data.terms.find((p) => p.taxonomy === t.taxonomy && (p.slug === t.parent || String(p.id) === t.parent));
+  // Terms nest under their parent when the taxonomy's URLs do. WordPress does that for categories by default.
+  const nestsUrls = (taxonomy: string) => taxonomyOf.get(taxonomy)?.rewrite?.hierarchical ?? taxonomy === 'category';
+  const termPath = (t: (typeof data.terms)[number], seen = new Set<number>()): string => {
+    const parent = nestsUrls(t.taxonomy) && !seen.has(t.id) ? parentOf(t) : undefined;
+    return parent ? `${termPath(parent, seen.add(t.id))}/${t.slug}` : t.slug;
+  };
+  const termFile = (t: { taxonomy: string; slug: string }) => {
+    const term = termByKey.get(`${t.taxonomy}/${t.slug}`);
+    return `src/content/${taxonomyCollection(t.taxonomy)}/${term ? termPath(term) : t.slug}.json`;
+  };
   const reference = (id: unknown) => {
     const target = byId.get(Number(id));
     return target && migratable(target) ? docFile(target) : undefined;
@@ -408,9 +420,15 @@ function transform(manifest: Manifest, data: ReturnType<typeof parseExport>, rou
   const migratedTaxonomies = new Set(manifest.taxonomies.map((t) => t.name));
   for (const t of data.terms) {
     if (!migratedTaxonomies.has(t.taxonomy)) continue;
-    const parent = data.terms.find((p) => p.taxonomy === t.taxonomy && (p.slug === t.parent || String(p.id) === t.parent));
+    const parent = parentOf(t);
     files.set(termFile(t), JSON.stringify({ title: t.name, ...(t.description ? { description: t.description } : {}), ...(parent ? { parent: termFile(parent) } : {}) }, null, 2) + '\n');
     report.migrated[t.taxonomy] = (report.migrated[t.taxonomy] ?? 0) + 1;
+    const nextPath = (routes[taxonomyCollection(t.taxonomy)]?.pattern ?? '/:path/').replace(':path', termPath(t));
+    const oldPath = taxonomyOf.get(t.taxonomy)?.termUrls?.[t.slug];
+    if (oldPath && oldPath !== nextPath) report.urlMismatches.push({ old: oldPath, new: nextPath });
+  }
+  for (const t of manifest.taxonomies) {
+    if (!t.termUrls && data.terms.some((term) => term.taxonomy === t.name)) report.warnings.push(`No term links recorded for "${t.name}", so its URLs assume WordPress's defaults. Compare a few with the live site.`);
   }
 
   // Nav: the first WordPress menu, in order. Fall back to Home + top-level pages.

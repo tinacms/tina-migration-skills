@@ -29,7 +29,7 @@ type Field = {
   [k: string]: unknown;
 };
 type PostType = { name: string; label: string; editor: string; fields: Field[] };
-type Taxonomy = { name: string; label: string; hierarchical: boolean; postTypes: string[] };
+type Taxonomy = { name: string; label: string; hierarchical: boolean; postTypes: string[]; rewrite?: { base: string; hierarchical: boolean } };
 type Manifest = {
   site: { title: string; tagline: string; permalinkStructure: string };
   postTypes: PostType[];
@@ -171,15 +171,16 @@ async function main(): Promise<void> {
       { type: 'string', name: 'description', label: 'Description', ui: { component: 'textarea' } },
       ...(tax.hierarchical ? [{ type: 'reference', name: 'parent', label: 'Parent', collections: [name] }] : []),
     ];
-    // WordPress default term URLs: /category/<slug>/, /tag/<slug>/, /<taxonomy>/<slug>/
-    const base = tax.name === 'post_tag' ? 'tag' : tax.name;
+    // The tour reads the real rule from the term links. Otherwise WordPress's defaults: /category/<slug>/, /tag/<slug>/, /<taxonomy>/<slug>/
+    const base = tax.rewrite?.base ?? (tax.name === 'post_tag' ? 'tag' : tax.name);
+    const pattern = base ? `/${base}/:path/` : '/:path/';
     const usedBy: Record<string, string> = {};
     for (const pt of manifest.postTypes) {
       const field = pt.fields.find((f) => f.source?.kind === 'taxonomy' && f.source.taxonomy === tax.name);
       if (field) usedBy[toTinaName(pt.name)] = field.name;
     }
-    routes[name] = { kind: 'taxonomy', label: tax.label, pattern: `/${base}/:path/`, usedBy };
-    await writeFile(path.join(OUT_DIR, `${name}.ts`), collectionFile({ name, label: tax.label, format: 'json', routerPath: `/${base}/:path/`, fields, note: `WordPress taxonomy "${tax.name}"` }));
+    routes[name] = { kind: 'taxonomy', label: tax.label, pattern, usedBy };
+    await writeFile(path.join(OUT_DIR, `${name}.ts`), collectionFile({ name, label: tax.label, format: 'json', routerPath: pattern, fields, note: `WordPress taxonomy "${tax.name}"` }));
     exports.push(name);
   }
 

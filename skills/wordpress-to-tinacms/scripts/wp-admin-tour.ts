@@ -85,7 +85,16 @@ type PostTypeSchema = {
   unmapped: { id: string; title: string }[];
 };
 
-type Taxonomy = { name: string; label: string; hierarchical: boolean; postTypes: string[] };
+type Taxonomy = {
+  name: string;
+  label: string;
+  hierarchical: boolean;
+  postTypes: string[];
+  /** How WordPress builds this taxonomy's URLs, read from its term links. Missing = no links seen; WordPress's defaults apply. */
+  rewrite?: { base: string; hierarchical: boolean };
+  /** Term slug → URL path on the WordPress site. */
+  termUrls?: Record<string, string>;
+};
 
 type SiteSettings = {
   title: string;
@@ -587,6 +596,37 @@ function buildPostTypeSchema(
 // Export + main
 // ---------------------------------------------------------------------------
 
+/** Every term's slug and public link, from the taxonomy's admin screen. */
+async function readTermLinks(page: Page, tax: Taxonomy): Promise<{ slug: string; link: string }[]> {
+  const terms: { slug: string; link: string }[] = [];
+  for (let n = 1; ; n++) {
+    await page.goto(`${WP_ADMIN_URL}/edit-tags.php?taxonomy=${tax.name}&post_type=${tax.postTypes[0]}&paged=${n}`);
+    terms.push(
+      ...(await page.$$eval('#the-list tr[id^="tag-"]', (rows) =>
+        rows.map((r) => ({ slug: r.querySelector('td.slug')?.textContent?.trim() ?? '', link: r.querySelector('.row-actions .view a')?.getAttribute('href') ?? '' }))
+      ))
+    );
+    const pages = await page.$eval('.tablenav-pages .total-pages', (el) => Number(el.textContent?.replace(/\D/g, ''))).catch(() => 1);
+    if (n >= pages) return terms.filter((t) => t.slug && t.link);
+  }
+}
+
+/** A term's link is `<base>/<slug>/`, or `<base>/<ancestors>/<slug>/` when the taxonomy nests its URLs. */
+function taxonomyUrls(terms: { slug: string; link: string }[]): Pick<Taxonomy, 'rewrite' | 'termUrls'> {
+  const termUrls: Record<string, string> = {};
+  const prefixes: string[] = [];
+  for (const { slug, link } of terms) {
+    const url = new URL(link);
+    if (url.search) continue; // plain permalinks: the transform stops on these
+    const pathname = decodeURI(url.pathname).replace(/\/?$/, '/');
+    termUrls[slug] = pathname;
+    if (pathname.endsWith(`/${slug}/`)) prefixes.push(pathname.slice(0, -slug.length - 1));
+  }
+  if (!prefixes.length) return {};
+  const base = prefixes.reduce((a, b) => (b.length < a.length ? b : a));
+  return { rewrite: { base: base.replace(/^\/|\/$/g, ''), hierarchical: prefixes.some((p) => p !== base) }, termUrls };
+}
+
 async function exportContent(page: Page): Promise<void> {
   await page.goto(`${WP_ADMIN_URL}/export.php`);
   // The default radio is "All content" — just submit the form.
@@ -641,6 +681,8 @@ async function main(): Promise<void> {
       taxonomies.set(t.name, existing);
     }
   }
+
+  for (const tax of taxonomies.values()) Object.assign(tax, taxonomyUrls(await readTermLinks(page, tax)));
 
   const manifest: Manifest = {
     generatedAt: new Date().toISOString(),
