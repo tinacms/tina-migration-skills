@@ -11,13 +11,15 @@
  *   astro.config.mjs                          `redirects` for the front page's slug and every changed URL
  *   migration/transform-report.json           counts, skips, every new URL, and the URLs that changed
  *
- * Only published items are migrated unless you pass --drafts.
+ * Only published items are migrated unless you pass --drafts. Password-protected
+ * items are never migrated: they would become public. The report lists them.
  *
  * Usage (from the project root, after generate-collections.ts):
  *   migration/node_modules/.bin/tsx migration/transform-content.ts
  */
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { XMLParser } from 'fast-xml-parser';
 import TurndownService from 'turndown';
@@ -25,6 +27,7 @@ import { stringify as toYaml } from 'yaml';
 
 const ROOT = process.cwd();
 const INCLUDE_DRAFTS = process.argv.includes('--drafts');
+const ACCEPT_LOST_QUERY_URLS = process.argv.includes('--accept-lost-query-urls');
 
 type FieldSource =
   | { kind: 'core'; wpField: string }
@@ -37,7 +40,7 @@ type Manifest = {
   siteUrl: string;
   site: { title: string; tagline: string; frontPage: { show: 'posts' } | { show: 'page'; pageId: number; postsPageId?: number } };
   postTypes: { name: string; fields: Field[] }[];
-  taxonomies: { name: string; hierarchical: boolean }[];
+  taxonomies: { name: string; hierarchical: boolean; rewrite?: { base: string; hierarchical: boolean }; termUrls?: Record<string, string> }[];
 };
 type RouteRule = { kind: string; pattern: string };
 
@@ -45,10 +48,14 @@ type Item = {
   id: number;
   type: string;
   status: string;
+  password: string;
   slug: string;
   title: string;
   link: string;
+  /** The publish instant (GMT). */
   date: string;
+  /** WordPress's local date. Dated permalinks are built from this, not the instant. */
+  localDate: string;
   parent: number;
   menuOrder: number;
   content: string;
@@ -64,6 +71,8 @@ const taxonomyCollection = (tax: string) => toTinaName(tax === 'post_tag' ? 'tag
 const report = {
   migrated: {} as Record<string, number>,
   skipped: [] as string[],
+  /** Published behind a WordPress password. Not migrated: the new site has no equivalent, so someone has to decide. */
+  passwordProtected: [] as string[],
   media: 0,
   /** Approved comments on migrated entries. Not migrated: they need a comments service. */
   comments: 0,
@@ -71,7 +80,13 @@ const report = {
   urls: [] as string[],
   /** Old WordPress URLs that changed. Each gets a redirect in astro.config.mjs. */
   urlMismatches: [] as { old: string; new: string }[],
+  /** Old URLs that depend on a query string (/?p=123). Astro's redirects can't match these. */
+  queryUrls: [] as { old: string; new: string }[],
   warnings: [] as string[],
+  /** Files removed because their entry is gone from WordPress. */
+  removed: [] as string[],
+  /** Every file this script wrote → its hash. The next run uses it to find leftovers. */
+  generated: {} as Record<string, string>,
 };
 
 // ---------------------------------------------------------------------------
@@ -128,6 +143,8 @@ function maybeUnserialize(value: string): unknown {
   }
 }
 
+/** WordPress writes 0000-00-00 00:00:00 for a date it doesn't have, like the GMT date of a draft. */
+const wpDate = (x: unknown) => (text(x).startsWith('0000') ? '' : text(x));
 const asArray = <T>(x: T | T[] | undefined): T[] => (x === undefined ? [] : Array.isArray(x) ? x : [x]);
 const text = (x: unknown): string => (x === undefined || x === null ? '' : typeof x === 'object' ? String((x as Record<string, unknown>)['#text'] ?? '') : String(x));
 
@@ -148,10 +165,12 @@ function parseExport(xml: string) {
     id: Number(text(it['wp:post_id'])),
     type: text(it['wp:post_type']),
     status: text(it['wp:status']),
+    password: text(it['wp:post_password']),
     slug: text(it['wp:post_name']),
     title: text(it.title),
     link: text(it.link),
-    date: text(it['wp:post_date_gmt']) || text(it['wp:post_date']),
+    date: wpDate(it['wp:post_date_gmt']) || wpDate(it['wp:post_date']),
+    localDate: wpDate(it['wp:post_date']),
     parent: Number(text(it['wp:post_parent'])) || 0,
     menuOrder: Number(text(it['wp:menu_order'])) || 0,
     content: text(it['content:encoded']),
@@ -185,7 +204,8 @@ function transform(manifest: Manifest, data: ReturnType<typeof parseExport>, rou
   const byId = new Map(data.items.map((i) => [i.id, i]));
   const termById = new Map(data.terms.map((t) => [t.id, t]));
   const postTypeNames = new Set(manifest.postTypes.map((p) => p.name));
-  const migratable = (i: Item) => postTypeNames.has(i.type) && i.slug && (i.status === 'publish' || (INCLUDE_DRAFTS && i.status === 'draft'));
+  const inScope = (i: Item) => postTypeNames.has(i.type) && i.slug && (i.status === 'publish' || (INCLUDE_DRAFTS && i.status === 'draft'));
+  const migratable = (i: Item) => inScope(i) && !i.password;
 
   // Media: every attachment plus any other wp-content/uploads URL the content points at.
   const media = new Map<string, string>(); // remote URL → local /uploads/... path
@@ -212,7 +232,19 @@ function transform(manifest: Manifest, data: ReturnType<typeof parseExport>, rou
     return item.slug;
   };
   const docFile = (item: Item) => `src/content/${toTinaName(item.type)}/${docPath(item)}.mdx`;
-  const termFile = (t: { taxonomy: string; slug: string }) => `src/content/${taxonomyCollection(t.taxonomy)}/${t.slug}.json`;
+  const taxonomyOf = new Map(manifest.taxonomies.map((t) => [t.name, t]));
+  const termByKey = new Map(data.terms.map((t) => [`${t.taxonomy}/${t.slug}`, t]));
+  const parentOf = (t: (typeof data.terms)[number]) => data.terms.find((p) => p.taxonomy === t.taxonomy && (p.slug === t.parent || String(p.id) === t.parent));
+  // Terms nest under their parent when the taxonomy's URLs do. WordPress does that for categories by default.
+  const nestsUrls = (taxonomy: string) => taxonomyOf.get(taxonomy)?.rewrite?.hierarchical ?? taxonomy === 'category';
+  const termPath = (t: (typeof data.terms)[number], seen = new Set<number>()): string => {
+    const parent = nestsUrls(t.taxonomy) && !seen.has(t.id) ? parentOf(t) : undefined;
+    return parent ? `${termPath(parent, seen.add(t.id))}/${t.slug}` : t.slug;
+  };
+  const termFile = (t: { taxonomy: string; slug: string }) => {
+    const term = termByKey.get(`${t.taxonomy}/${t.slug}`);
+    return `src/content/${taxonomyCollection(t.taxonomy)}/${term ? termPath(term) : t.slug}.json`;
+  };
   const reference = (id: unknown) => {
     const target = byId.get(Number(id));
     return target && migratable(target) ? docFile(target) : undefined;
@@ -360,49 +392,70 @@ function transform(manifest: Manifest, data: ReturnType<typeof parseExport>, rou
     return { fm, body };
   }
 
+  const permalinkDate = (item: Item) => (item.localDate || (toIsoDate(item.date) ?? '1970-01-01')).slice(0, 10).replaceAll('-', '/');
+
   // URL each document gets on the new site, to compare with its WordPress permalink.
   const newUrl = (item: Item) => {
     const rule = routes[toTinaName(item.type)];
-    const d = new Date(toIsoDate(item.date) ?? 0);
+    const [year, month, day] = permalinkDate(item).split('/');
     const front = manifest.site.frontPage;
     if (front.show === 'page' && front.pageId === item.id) return '/';
     return (rule?.pattern ?? '/:path/')
       .replace(':path', docPath(item))
-      .replace(':year', String(d.getUTCFullYear()))
-      .replace(':month', String(d.getUTCMonth() + 1).padStart(2, '0'))
-      .replace(':day', String(d.getUTCDate()).padStart(2, '0'));
+      .replace(':year', year)
+      .replace(':month', month)
+      .replace(':day', day);
   };
 
   const files = new Map<string, string>();
   for (const item of data.items) {
     if (!postTypeNames.has(item.type)) continue;
+    if (inScope(item) && item.password) {
+      report.passwordProtected.push(`${item.type}/${item.slug}`);
+      continue;
+    }
     if (!migratable(item)) {
       if (item.status !== 'auto-draft' && item.status !== 'inherit') report.skipped.push(`${item.type}/${item.slug || item.id} (${item.status})`);
       continue;
     }
     const pt = manifest.postTypes.find((p) => p.name === item.type)!;
     const { fm, body } = frontmatter(item, pt.fields);
+    if (/:(year|month|day)/.test(routes[toTinaName(item.type)]?.pattern ?? '')) fm.permalink_date = permalinkDate(item);
     files.set(docFile(item), `---\n${toYaml(fm, { lineWidth: 0 })}---\n\n${body}\n`);
     report.migrated[item.type] = (report.migrated[item.type] ?? 0) + 1;
     report.comments += item.comments;
-    const oldPath = item.link ? new URL(item.link).pathname : '';
+    const oldUrl = item.link ? new URL(item.link) : undefined;
+    const oldPath = oldUrl?.search ? '' : oldUrl?.pathname;
     const nextPath = newUrl(item);
     report.urls.push(nextPath);
+    if (oldUrl?.search) report.queryUrls.push({ old: oldUrl.pathname + oldUrl.search, new: nextPath });
     if (oldPath && oldPath !== nextPath) report.urlMismatches.push({ old: oldPath, new: nextPath });
   }
 
   const migratedTaxonomies = new Set(manifest.taxonomies.map((t) => t.name));
   for (const t of data.terms) {
     if (!migratedTaxonomies.has(t.taxonomy)) continue;
-    const parent = data.terms.find((p) => p.taxonomy === t.taxonomy && (p.slug === t.parent || String(p.id) === t.parent));
+    const parent = parentOf(t);
     files.set(termFile(t), JSON.stringify({ title: t.name, ...(t.description ? { description: t.description } : {}), ...(parent ? { parent: termFile(parent) } : {}) }, null, 2) + '\n');
     report.migrated[t.taxonomy] = (report.migrated[t.taxonomy] ?? 0) + 1;
+    const nextPath = (routes[taxonomyCollection(t.taxonomy)]?.pattern ?? '/:path/').replace(':path', termPath(t));
+    report.urls.push(nextPath);
+    const oldPath = taxonomyOf.get(t.taxonomy)?.termUrls?.[t.slug];
+    if (oldPath && oldPath !== nextPath) report.urlMismatches.push({ old: oldPath, new: nextPath });
+  }
+  for (const t of manifest.taxonomies) {
+    if (!t.termUrls && data.terms.some((term) => term.taxonomy === t.name)) report.warnings.push(`No term links recorded for "${t.name}", so its URLs assume WordPress's defaults. Compare a few with the live site.`);
   }
 
   // Nav: the first WordPress menu, in order. Fall back to Home + top-level pages.
   const menuItems = data.items.filter((i) => i.type === 'nav_menu_item' && i.status === 'publish');
   const firstMenu = menuItems[0]?.terms.find((t) => t.domain === 'nav_menu')?.slug;
+  const linksToSkippedEntry = (i: Item) => {
+    const target = byId.get(Number(i.meta.get('_menu_item_object_id')));
+    return i.meta.get('_menu_item_type') === 'post_type' && !!target && !migratable(target);
+  };
   const nav = menuItems
+    .filter((i) => !linksToSkippedEntry(i))
     .filter((i) => i.terms.some((t) => t.domain === 'nav_menu' && t.slug === firstMenu) && i.meta.get('_menu_item_menu_item_parent') === '0')
     .sort((a, b) => a.menuOrder - b.menuOrder)
     .map((i) => {
@@ -433,6 +486,8 @@ function transform(manifest: Manifest, data: ReturnType<typeof parseExport>, rou
 // Main
 // ---------------------------------------------------------------------------
 
+const sha256 = (content: string | Buffer) => createHash('sha256').update(content).digest('hex');
+
 async function writeAt(rel: string, content: string | Buffer) {
   const abs = path.join(ROOT, rel);
   await mkdir(path.dirname(abs), { recursive: true });
@@ -448,16 +503,49 @@ async function main(): Promise<void> {
   const data = parseExport(await readFile(path.join(ROOT, 'migration/wp-export.xml'), 'utf8'));
   const result = transform(manifest, data, wordpressJson.routes);
 
-  for (const [rel, content] of result.files) await writeAt(rel, content);
+  if (report.queryUrls.length && !ACCEPT_LOST_QUERY_URLS) {
+    throw new Error(
+      `Stopped before writing anything: ${report.queryUrls.length} entries have query-string URLs, like ${report.queryUrls[0].old}. ` +
+        'Astro\'s redirects match paths only, so these old links can\'t be preserved on the new site. ' +
+        'To go ahead, run again with --accept-lost-query-urls. The report then lists them as queryUrls, ready to turn into rules on the host.'
+    );
+  }
+
+  // What the last run wrote, read before this run replaces the report.
+  const reportPath = path.join(ROOT, 'migration/transform-report.json');
+  const previous: Record<string, string> = await readFile(reportPath, 'utf8').then((r) => JSON.parse(r).generated ?? {}).catch(() => ({}));
+
+  for (const [rel, content] of result.files) {
+    await writeAt(rel, content);
+    report.generated[rel] = sha256(content);
+  }
 
   for (const [url, local] of result.media) {
     const res = await fetch(url);
+    const rel = path.posix.join('public', local);
     if (!res.ok) {
       report.warnings.push(`Media download failed (${res.status}): ${url}`);
+      if (previous[rel]) report.generated[rel] = previous[rel]; // still wanted, so don't treat the old copy as a leftover
       continue;
     }
-    await writeAt(path.join('public', local), Buffer.from(await res.arrayBuffer()));
+    const file = Buffer.from(await res.arrayBuffer());
+    await writeAt(rel, file);
+    report.generated[rel] = sha256(file);
     report.media++;
+  }
+
+  // Remove what the last run wrote and this one didn't: deleted, renamed or unpublished entries.
+  // A file that was never generated isn't listed, and one edited since the last run doesn't match its hash. Both stay.
+  for (const [rel, hash] of Object.entries(previous)) {
+    if (report.generated[rel]) continue;
+    const current = await readFile(path.join(ROOT, rel)).catch(() => undefined);
+    if (!current) continue;
+    if (sha256(current) === hash) {
+      await rm(path.join(ROOT, rel));
+      report.removed.push(rel);
+    } else {
+      report.warnings.push(`${rel} is no longer in WordPress but was edited after the last run, so it was kept. Delete it if it should go.`);
+    }
   }
 
   // Merge site identity + nav into the starter's global config, keeping its other settings.
@@ -489,9 +577,12 @@ async function main(): Promise<void> {
 
   console.log(`[transform] migrated: ${Object.entries(report.migrated).map(([k, v]) => `${v} ${k}`).join(', ')}`);
   console.log(`[transform] media: ${report.media} files → public/uploads/`);
+  if (report.removed.length) console.log(`[transform] removed, no longer in WordPress: ${report.removed.join(', ')}`);
   if (report.skipped.length) console.log(`[transform] skipped: ${report.skipped.join(', ')}`);
+  for (const p of report.passwordProtected) console.warn(`[transform]   NEEDS A DECISION: ${p} is password-protected, so it was not migrated`);
   if (report.comments) console.warn(`[transform]   NOT MIGRATED: ${report.comments} approved comments (needs a comments service)`);
   for (const m of report.urlMismatches) console.warn(`[transform]   URL CHANGED: ${m.old} → ${m.new} (redirect added)`);
+  if (report.queryUrls.length) console.warn(`[transform]   NOT REDIRECTED: ${report.queryUrls.length} query-string URLs. See queryUrls in the report; they need rules on the host.`);
   for (const w of report.warnings) console.warn(`[transform]   WARNING: ${w}`);
   console.log('[transform] report written to migration/transform-report.json');
 }

@@ -26,7 +26,7 @@ const title = seo.title || (doc && url !== '/' ? `${doc.title} - ${site.title}` 
 const description = seo.description || doc?.values.excerpt || site.tagline || site.title;
 ---
 
-<Base title={title} description={description} image={seo.og_image || doc?.values.featured_image}>
+<Base title={title} description={description} image={seo.og_image || doc?.values.featured_image} canonical={seo.canonical} noindex={seo.noindex}>
 	{doc && <Entry doc={doc} byFile={byFile} />}
 	{route.listing && <EntryList listing={route.listing} />}
 </Base>
