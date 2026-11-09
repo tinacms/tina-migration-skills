@@ -2,7 +2,7 @@
 
 AI assistant skills for migrating existing websites to [TinaCMS](https://tina.io). Primary focus: **WordPress**.
 
-Each skill is a reusable, discoverable prompt that an AI assistant (Claude Code, Cursor, Copilot, etc.) can load to drive a specific migration path end-to-end — asking discovery questions first, then orchestrating the work.
+Each skill is a reusable, discoverable prompt that an AI assistant (Claude Code, Cursor, Copilot, etc.) can load to drive a specific migration path end to end, from one prompt with the site's URL to a running local site.
 
 ## Status
 
@@ -25,6 +25,8 @@ Then, in an empty folder, ask for the migration:
 
 Or just say *"Migrate example.com from WordPress to TinaCMS"*. Claude picks up the skill on its own.
 
+Claude sets everything up and asks you for one thing: an Administrator login, put in a file it creates (never in the chat). It finishes with the site running at `http://localhost:4321`, the editor at `/admin`, and a `MIGRATION-SUMMARY.md` that ends with a checklist for going live.
+
 New versions arrive when you run `/plugin marketplace update tinacms`, or on their own if you turn on auto-update for `tinacms` under **Marketplaces** in `/plugin`.
 
 ## Repository layout
@@ -39,13 +41,14 @@ tina-migration-skills/
 ├── skills/
 │   ├── wordpress-to-tinacms/
 │   │   ├── SKILL.md                            # orchestrator prompt the AI loads
-│   │   ├── discovery.md                        # questions asked up front
+│   │   ├── discovery.md                        # defaults used instead of questions
 │   │   ├── admin-tour.md                       # how the schema is derived from /wp-admin
 │   │   ├── schema-mapping.md                   # WP field type → Tina field type reference
 │   │   ├── scripts/
 │   │   │   ├── wp-admin-tour.ts                # Playwright tour of /wp-admin → schema.json + export
 │   │   │   ├── generate-collections.ts         # schema.json → tina/collections/*.ts
-│   │   │   └── transform-content.ts            # wp-export.xml → MDX/JSON content + media
+│   │   │   ├── transform-content.ts            # wp-export.xml → MDX/JSON content + media + redirects
+│   │   │   └── check-site.ts                   # requests every migrated and redirected URL on the local site
 │   │   ├── templates/astro/                    # generic Astro routes that replace the starter's demo model
 │   │   └── examples/
 │   │       └── <case-study>.md                 # worked examples from real migrations
@@ -73,7 +76,7 @@ Every skill folder contains:
 | File | Purpose |
 |---|---|
 | `SKILL.md` | The main orchestrator prompt the AI loads. Describes the skill's purpose, when to use it, inputs, outputs, and sub-steps. |
-| `discovery.md` | The questions the skill asks the user up front, before doing any work. See [Discovery first](#discovery-first). |
+| `discovery.md` | The defaults the skill uses instead of asking questions, and the few cases where it stops to ask. See [One prompt, sensible defaults](#one-prompt-sensible-defaults). |
 | `admin-tour.md` *(or similar)* | How the skill derives its target schema from the source — observation of the source CMS's editor, not scraping or exports. |
 | `schema-mapping.md` | Reference table — source field types → TinaCMS field types. |
 | `scripts/*.ts` | Automation scripts (Playwright tours, generators, transformers). |
@@ -94,11 +97,11 @@ The goal of a migration isn't just to move the content — it's to give editors 
 
 ### Local-first delivery
 
-Skills produce a **working local project** — `pnpm dev` runs it, `localhost:4321/admin` is the editor. TinaCloud, hosting, DNS, and SEO cutover are deliberately out of scope. Those are decisions the team makes separately once they're happy with the local pilot.
+Skills produce a **working local project**, left running: `pnpm dev` serves it, `localhost:4321/admin` is the editor. They don't deploy. TinaCloud, hosting, DNS and SEO cutover are the team's decisions, so the skill ends with a go-live checklist instead of doing them.
 
-### Discovery first
+### One prompt, sensible defaults
 
-Every skill opens with discovery questions — source URL, admin credentials (stored only in `.env.local`), target framework (Astro by default), scope boundaries. The skill does not start modifying files until it has the answers it needs. Example questions live in each skill's `discovery.md`.
+A migration starts from one prompt with the site's URL and runs to the end. Instead of asking discovery questions up front, a skill uses written defaults (each skill's `discovery.md`), records them in the project, and stops only when it can't go on without the user: credentials (kept in `.env.local`, never in chat), a failed login, or a failed export. Anything it can't migrate goes on a **Needs a decision** list in the summary instead of blocking the run.
 
 ### Destination details
 
@@ -108,14 +111,14 @@ Migrated TinaCMS sites use `/admin` as the editor route (not `/wp-admin`). Docum
 
 Skills default to [Astro](https://astro.build/) as the target frontend. [TinaCMS has made Astro its default starter](https://tina.io/blog/astro-is-becoming-the-default-tinacms-starter), and Astro's content-first, zero-JS-by-default model fits the kind of sites typically migrated off WordPress (blogs, agency sites, business brochures, portfolios).
 
-The discovery questions include a check for cases where [Next.js](https://nextjs.org/) is the better target:
+Some sites are better served by [Next.js](https://nextjs.org/) or an app service. Skills flag these in their summary instead of switching on their own:
 
 - user accounts or auth beyond read-only
 - server-rendered dashboards or admin-like features
 - a heavy React component library the team already owns
 - e-commerce with cart / checkout
 
-If a skill picks Next.js, it should say so explicitly and explain why in its output, so the user knows an escape hatch was taken.
+The team decides. If a skill is asked to target Next.js, it should say so in its output, so the user knows an escape hatch was taken.
 
 ### Portable prompts
 
@@ -127,7 +130,7 @@ Skills are written as plain Markdown so they can be used with:
 
 ## Using a skill with other AI assistants
 
-Clone this repo and point your assistant at the skill's `SKILL.md`, or paste its contents into your assistant's prompt / rules / system message. Where it says `${CLAUDE_SKILL_DIR}`, use the path of the skill's folder in your clone, so the assistant can find the scripts and templates. The skill asks the same discovery questions and follows the same steps.
+Clone this repo and point your assistant at the skill's `SKILL.md`, or paste its contents into your assistant's prompt / rules / system message. Where it says `${CLAUDE_SKILL_DIR}`, use the path of the skill's folder in your clone, so the assistant can find the scripts and templates. The skill follows the same steps.
 
 ## Developing the plugin
 
@@ -136,6 +139,8 @@ Load your working copy instead of the published plugin:
 ```bash
 claude --plugin-dir /path/to/tina-migration-skills
 ```
+
+A running session keeps the skill text it loaded at startup. After editing `SKILL.md`, run `/reload-plugins` or start a new session before you test.
 
 Check the manifests before you push:
 

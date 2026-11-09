@@ -26,7 +26,7 @@ Keep field `name` identical to WordPress where possible so editors see the same 
 | Author | `{ type: 'reference', name: 'author', collections: ['author'] }` | Only if the user maintains an authors collection; otherwise `{ type: 'string', name: 'author' }`. |
 | Featured image | `{ type: 'image', name: 'featured_image' }` | Media library migrated to `public/uploads/`. |
 | Status (publish/draft) | *(file location)* | Draft content either migrates to a `src/content/drafts/` folder or is skipped — user's choice in discovery. |
-| Comments allowed | *(skip)* | Comments are out of scope for v1 (see discovery.md step 10). |
+| Comments allowed | *(skip)* | Comments aren't migrated. `transform-content.ts` counts them, and the summary lists them under **Needs a decision**. |
 
 ## Taxonomies
 
