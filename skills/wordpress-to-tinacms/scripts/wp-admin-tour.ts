@@ -499,7 +499,7 @@ const CORE_METABOXES = new Set([
 ]);
 
 // Field names the templates and the generators give a meaning to. An ACF group can't use them.
-const RESERVED_FIELD_NAMES = ['title', 'date', 'excerpt', 'featured_image', 'seo', 'body'];
+const RESERVED_FIELD_NAMES = ['title', 'date', 'permalink_date', 'excerpt', 'featured_image', 'seo', 'body'];
 const renamedGroups = new Set<string>();
 const fieldNameCollisions: string[] = [];
 

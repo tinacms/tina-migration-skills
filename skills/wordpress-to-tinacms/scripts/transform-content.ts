@@ -49,7 +49,10 @@ type Item = {
   slug: string;
   title: string;
   link: string;
+  /** The publish instant (GMT). */
   date: string;
+  /** WordPress's local date. Dated permalinks are built from this, not the instant. */
+  localDate: string;
   parent: number;
   menuOrder: number;
   content: string;
@@ -125,6 +128,8 @@ function maybeUnserialize(value: string): unknown {
   }
 }
 
+/** WordPress writes 0000-00-00 00:00:00 for a date it doesn't have, like the GMT date of a draft. */
+const wpDate = (x: unknown) => (text(x).startsWith('0000') ? '' : text(x));
 const asArray = <T>(x: T | T[] | undefined): T[] => (x === undefined ? [] : Array.isArray(x) ? x : [x]);
 const text = (x: unknown): string => (x === undefined || x === null ? '' : typeof x === 'object' ? String((x as Record<string, unknown>)['#text'] ?? '') : String(x));
 
@@ -149,7 +154,8 @@ function parseExport(xml: string) {
     slug: text(it['wp:post_name']),
     title: text(it.title),
     link: text(it.link),
-    date: text(it['wp:post_date_gmt']) || text(it['wp:post_date']),
+    date: wpDate(it['wp:post_date_gmt']) || wpDate(it['wp:post_date']),
+    localDate: wpDate(it['wp:post_date']),
     parent: Number(text(it['wp:post_parent'])) || 0,
     menuOrder: Number(text(it['wp:menu_order'])) || 0,
     content: text(it['content:encoded']),
@@ -358,17 +364,19 @@ function transform(manifest: Manifest, data: ReturnType<typeof parseExport>, rou
     return { fm, body };
   }
 
+  const permalinkDate = (item: Item) => (item.localDate || (toIsoDate(item.date) ?? '1970-01-01')).slice(0, 10).replaceAll('-', '/');
+
   // URL each document gets on the new site, to compare with its WordPress permalink.
   const newUrl = (item: Item) => {
     const rule = routes[toTinaName(item.type)];
-    const d = new Date(toIsoDate(item.date) ?? 0);
+    const [year, month, day] = permalinkDate(item).split('/');
     const front = manifest.site.frontPage;
     if (front.show === 'page' && front.pageId === item.id) return '/';
     return (rule?.pattern ?? '/:path/')
       .replace(':path', docPath(item))
-      .replace(':year', String(d.getUTCFullYear()))
-      .replace(':month', String(d.getUTCMonth() + 1).padStart(2, '0'))
-      .replace(':day', String(d.getUTCDate()).padStart(2, '0'));
+      .replace(':year', year)
+      .replace(':month', month)
+      .replace(':day', day);
   };
 
   const files = new Map<string, string>();
@@ -384,6 +392,7 @@ function transform(manifest: Manifest, data: ReturnType<typeof parseExport>, rou
     }
     const pt = manifest.postTypes.find((p) => p.name === item.type)!;
     const { fm, body } = frontmatter(item, pt.fields);
+    if (/:(year|month|day)/.test(routes[toTinaName(item.type)]?.pattern ?? '')) fm.permalink_date = permalinkDate(item);
     files.set(docFile(item), `---\n${toYaml(fm, { lineWidth: 0 })}---\n\n${body}\n`);
     report.migrated[item.type] = (report.migrated[item.type] ?? 0) + 1;
     const oldPath = item.link ? new URL(item.link).pathname : '';

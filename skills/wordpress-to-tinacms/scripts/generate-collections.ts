@@ -155,6 +155,10 @@ async function main(): Promise<void> {
     const pattern = kind === 'post' ? postPattern(manifest.site.permalinkStructure) : kind === 'page' ? '/:path/' : `/${pt.name}/:path/`;
     routes[name] = { kind, label: pt.label, pattern, ...(kind === 'cpt' ? { archive: `/${pt.name}/` } : {}) };
     const fields = pt.fields.map((f) => toTinaField(f, collectionNames));
+    // The publish date is stored in GMT, so it can't rebuild a URL that used the site's local date.
+    if (/:(year|month|day)/.test(pattern)) {
+      fields.splice(fields.findIndex((f) => f.name === 'date') + 1, 0, { type: 'string', name: 'permalink_date', label: 'Permalink date', description: 'Part of this entry\'s URL, as YYYY/MM/DD. Changing it changes the URL.' });
+    }
     const routerPath = pattern.includes(':year') ? undefined : pattern;
     await writeFile(path.join(OUT_DIR, `${name}.ts`), collectionFile({ name, label: pt.label, format: 'mdx', routerPath, fields, note: `WordPress post type "${pt.name}" (${pt.editor} editor)` }));
     exports.push(name);
