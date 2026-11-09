@@ -17,7 +17,8 @@
  *   migration/node_modules/.bin/tsx migration/transform-content.ts
  */
 
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { XMLParser } from 'fast-xml-parser';
 import TurndownService from 'turndown';
@@ -75,6 +76,10 @@ const report = {
   /** Old URLs that depend on a query string (/?p=123). Astro's redirects can't match these. */
   queryUrls: [] as { old: string; new: string }[],
   warnings: [] as string[],
+  /** Files removed because their entry is gone from WordPress. */
+  removed: [] as string[],
+  /** Every file this script wrote → its hash. The next run uses it to find leftovers. */
+  generated: {} as Record<string, string>,
 };
 
 // ---------------------------------------------------------------------------
@@ -470,6 +475,8 @@ function transform(manifest: Manifest, data: ReturnType<typeof parseExport>, rou
 // Main
 // ---------------------------------------------------------------------------
 
+const sha256 = (content: string | Buffer) => createHash('sha256').update(content).digest('hex');
+
 async function writeAt(rel: string, content: string | Buffer) {
   const abs = path.join(ROOT, rel);
   await mkdir(path.dirname(abs), { recursive: true });
@@ -493,16 +500,41 @@ async function main(): Promise<void> {
     );
   }
 
-  for (const [rel, content] of result.files) await writeAt(rel, content);
+  // What the last run wrote, read before this run replaces the report.
+  const reportPath = path.join(ROOT, 'migration/transform-report.json');
+  const previous: Record<string, string> = await readFile(reportPath, 'utf8').then((r) => JSON.parse(r).generated ?? {}).catch(() => ({}));
+
+  for (const [rel, content] of result.files) {
+    await writeAt(rel, content);
+    report.generated[rel] = sha256(content);
+  }
 
   for (const [url, local] of result.media) {
     const res = await fetch(url);
+    const rel = path.posix.join('public', local);
     if (!res.ok) {
       report.warnings.push(`Media download failed (${res.status}): ${url}`);
+      if (previous[rel]) report.generated[rel] = previous[rel]; // still wanted, so don't treat the old copy as a leftover
       continue;
     }
-    await writeAt(path.join('public', local), Buffer.from(await res.arrayBuffer()));
+    const file = Buffer.from(await res.arrayBuffer());
+    await writeAt(rel, file);
+    report.generated[rel] = sha256(file);
     report.media++;
+  }
+
+  // Remove what the last run wrote and this one didn't: deleted, renamed or unpublished entries.
+  // A file that was never generated isn't listed, and one edited since the last run doesn't match its hash. Both stay.
+  for (const [rel, hash] of Object.entries(previous)) {
+    if (report.generated[rel]) continue;
+    const current = await readFile(path.join(ROOT, rel)).catch(() => undefined);
+    if (!current) continue;
+    if (sha256(current) === hash) {
+      await rm(path.join(ROOT, rel));
+      report.removed.push(rel);
+    } else {
+      report.warnings.push(`${rel} is no longer in WordPress but was edited after the last run, so it was kept. Delete it if it should go.`);
+    }
   }
 
   // Merge site identity + nav into the starter's global config, keeping its other settings.
@@ -528,6 +560,7 @@ async function main(): Promise<void> {
 
   console.log(`[transform] migrated: ${Object.entries(report.migrated).map(([k, v]) => `${v} ${k}`).join(', ')}`);
   console.log(`[transform] media: ${report.media} files → public/uploads/`);
+  if (report.removed.length) console.log(`[transform] removed, no longer in WordPress: ${report.removed.join(', ')}`);
   if (report.skipped.length) console.log(`[transform] skipped: ${report.skipped.join(', ')}`);
   for (const p of report.passwordProtected) console.warn(`[transform]   NEEDS A DECISION: ${p} is password-protected, so it was not migrated`);
   for (const m of report.urlMismatches) console.warn(`[transform]   URL CHANGED: ${m.old} → ${m.new} (add a redirect)`);
