@@ -1,0 +1,55 @@
+# Local WordPress test site for the wordpress-to-tinacms skill.
+# Dummy credentials only — never point this at a real database.
+name: tina-wp-test
+
+x-db-env: &db-env
+  WORDPRESS_DB_HOST: db
+  WORDPRESS_DB_USER: wordpress
+  WORDPRESS_DB_PASSWORD: wordpress
+  WORDPRESS_DB_NAME: wordpress
+
+services:
+  db:
+    image: mariadb:11
+    environment:
+      MARIADB_DATABASE: wordpress
+      MARIADB_USER: wordpress
+      MARIADB_PASSWORD: wordpress
+      MARIADB_ROOT_PASSWORD: root
+    volumes:
+      - db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      retries: 30
+
+  wordpress:
+    image: wordpress:php8.3-apache
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:80"
+    environment: *db-env
+    volumes:
+      - wp:/var/www/html
+      - ./mu-plugins:/var/www/html/wp-content/mu-plugins:ro
+
+  # One-shot WP-CLI container used by setup.sh (`docker compose run --rm cli wp ...`)
+  cli:
+    image: wordpress:cli-php8.3
+    profiles: ["cli"]
+    depends_on:
+      - wordpress
+    user: "33:33" # match the apache image's www-data so file permissions line up
+    environment:
+      <<: *db-env
+      WP_CLI_CACHE_DIR: /tmp/wp-cli-cache
+    volumes:
+      - wp:/var/www/html
+      - ./mu-plugins:/var/www/html/wp-content/mu-plugins:ro
+      - ./seed:/seed:ro
+
+volumes:
+  db:
+  wp:

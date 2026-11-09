@@ -4,6 +4,15 @@ Reference for the mapper step. For each WordPress editor control the admin tour 
 
 Keep field `name` identical to WordPress where possible so editors see the same labels in both tools.
 
+> **Lists of references.** Tina `reference` fields can't take `list: true`. A list of references is an object list wrapping one reference:
+>
+> ```ts
+> { type: 'object', name: 'categories', label: 'Categories', list: true,
+>   fields: [{ type: 'reference', name: 'item', label: 'Category', collections: ['category'] }] }
+> ```
+>
+> Everywhere this table says "list of references", it means this shape.
+
 ## Core editor fields
 
 | WordPress editor field | TinaCMS field | Notes |
@@ -23,7 +32,7 @@ Keep field `name` identical to WordPress where possible so editors see the same 
 
 | WordPress | TinaCMS |
 |---|---|
-| Categories | New collection `category` with `{title, slug, description}`; on each post: `{ type: 'reference', name: 'categories', list: true, collections: ['category'] }` |
+| Categories | New collection `category` with `{title, slug, description}`; on each post: `categories`, a list of references to `category` |
 | Tags | Same shape as categories: new collection `tag`, posts get a list of references. |
 | Custom taxonomy (hierarchical) | New collection with `{title, slug, description, parent?: reference}`; posts get a list of references. |
 | Custom taxonomy (flat) | New collection with `{title, slug}`; posts get a list of references. |
@@ -32,13 +41,13 @@ If the taxonomy has very few values and never grows, a `{ type: 'string', list: 
 
 ## ACF (Advanced Custom Fields)
 
-ACF's own types map directly to Tina:
+Each ACF **field group** becomes one Tina `object` field named after the group (`Event Details` → `event_details`), holding that group's fields. This mirrors the panel editors see in WordPress. ACF's own field types map directly to Tina:
 
 | ACF type | TinaCMS field |
 |---|---|
 | Text | `{ type: 'string' }` |
 | Textarea | `{ type: 'string', ui: { component: 'textarea' } }` |
-| Number | `{ type: 'number' }` |
+| Number / Range | `{ type: 'number' }` |
 | Email | `{ type: 'string' }` (with `validate` for format if needed) |
 | URL | `{ type: 'string' }` (with `validate`) |
 | Password | *(skip — don't migrate secrets)* |
@@ -46,9 +55,11 @@ ACF's own types map directly to Tina:
 | File | `{ type: 'image' }` (Tina's image field accepts any file) |
 | WYSIWYG | `{ type: 'rich-text' }` |
 | oEmbed | `{ type: 'string' }` — store the URL, render as embed at the frontend |
-| Select | `{ type: 'string', options: [...] }` |
+| Gallery | `{ type: 'image', list: true }` |
+| Select | `{ type: 'string', options: [...] }` (`list: true` if multi-select). Keep ACF's choice labels: `options: [{ value: 'in-person', label: 'In person' }]` |
 | Checkbox | `{ type: 'string', list: true, options: [...] }` |
-| Radio | `{ type: 'string', options: [...] }` |
+| Radio / Button Group | `{ type: 'string', options: [...] }` |
+| Link | `{ type: 'object', fields: [title, url, target] }`, all `string` |
 | True/False | `{ type: 'boolean' }` |
 | Date Picker | `{ type: 'datetime' }` |
 | Date Time Picker | `{ type: 'datetime' }` |
@@ -61,16 +72,28 @@ ACF's own types map directly to Tina:
 | Group | `{ type: 'object', fields: [...] }` — recurse into the group's fields |
 | Repeater | `{ type: 'object', list: true, fields: [...] }` — recurse |
 | Flexible Content | `{ type: 'object', list: true, templates: [...] }` — one template per layout, recurse |
-| Clone | *(resolve — treat the clone as if the referenced fields were inlined)* |
-| Post Object | `{ type: 'reference', collections: [...] }` |
+| Clone | *(resolve by hand — treat the clone as if the referenced fields were inlined. The tour logs it as skipped.)* |
+| Post Object | `{ type: 'reference', collections: [...] }` (list of references if "Select multiple") |
 | Page Link | `{ type: 'reference', collections: [...] }` or `{ type: 'string' }` for external |
-| Relationship | `{ type: 'reference', list: true, collections: [...] }` |
-| Taxonomy | `{ type: 'reference', list: true, collections: ['category'] }` (or the specific taxonomy collection) |
+| Relationship | List of references to the field's post types |
+| Taxonomy | Single reference (radio/select UI) or list of references (checkbox/multi-select UI) to that taxonomy's collection |
 | User | *(skip — user management out of scope)* |
+
+Every ACF field also gets `required: true` if it's required in ACF, and `description` from ACF's "Instructions".
 
 ## Yoast / Rank Math SEO
 
-Collapse into a single `seo` object on each post type:
+Collapse into a single `seo` object on each post type that shows the SEO metabox. Source meta keys:
+
+| Field | Yoast | Rank Math |
+|---|---|---|
+| `title` | `_yoast_wpseo_title` | `rank_math_title` |
+| `description` | `_yoast_wpseo_metadesc` | `rank_math_description` |
+| `canonical` | `_yoast_wpseo_canonical` | `rank_math_canonical_url` |
+| `og_image` | `_yoast_wpseo_opengraph-image` | `rank_math_facebook_image` |
+| `noindex` | `_yoast_wpseo_meta-robots-noindex` = `1` | `rank_math_robots` contains `noindex` |
+
+Yoast titles can contain variables like `%%title%% %%sep%% %%sitename%%`. Resolve these during the content transform. Don't copy them literally.
 
 ```ts
 {

@@ -1,0 +1,918 @@
+{
+  "siteUrl": "http://localhost:8080",
+  "wpVersion": "7.1.3",
+  "postTypes": [
+    {
+      "name": "post",
+      "label": "Posts",
+      "editor": "block",
+      "fields": [
+        {
+          "type": "string",
+          "name": "title",
+          "label": "Title",
+          "isTitle": true,
+          "required": true,
+          "source": {
+            "kind": "core",
+            "wpField": "post_title"
+          }
+        },
+        {
+          "type": "datetime",
+          "name": "date",
+          "label": "Publish date",
+          "source": {
+            "kind": "core",
+            "wpField": "post_date"
+          }
+        },
+        {
+          "type": "string",
+          "name": "excerpt",
+          "label": "Excerpt",
+          "ui": {
+            "component": "textarea"
+          },
+          "source": {
+            "kind": "core",
+            "wpField": "post_excerpt"
+          }
+        },
+        {
+          "type": "image",
+          "name": "featured_image",
+          "label": "Featured Image",
+          "source": {
+            "kind": "core",
+            "wpField": "_thumbnail_id"
+          }
+        },
+        {
+          "type": "object",
+          "name": "categories",
+          "label": "Categories",
+          "list": true,
+          "fields": [
+            {
+              "type": "reference",
+              "name": "item",
+              "label": "Category",
+              "collections": [
+                "category"
+              ]
+            }
+          ],
+          "source": {
+            "kind": "taxonomy",
+            "taxonomy": "category"
+          }
+        },
+        {
+          "type": "object",
+          "name": "tags",
+          "label": "Tags",
+          "list": true,
+          "fields": [
+            {
+              "type": "reference",
+              "name": "item",
+              "label": "Tag",
+              "collections": [
+                "tag"
+              ]
+            }
+          ],
+          "source": {
+            "kind": "taxonomy",
+            "taxonomy": "post_tag"
+          }
+        },
+        {
+          "type": "object",
+          "name": "seo",
+          "label": "SEO",
+          "source": {
+            "kind": "seo",
+            "plugin": "yoast"
+          },
+          "fields": [
+            {
+              "type": "string",
+              "name": "title",
+              "label": "SEO Title",
+              "source": {
+                "kind": "seo",
+                "plugin": "yoast",
+                "metaKey": "_yoast_wpseo_title"
+              }
+            },
+            {
+              "type": "string",
+              "name": "description",
+              "label": "Meta Description",
+              "ui": {
+                "component": "textarea"
+              },
+              "source": {
+                "kind": "seo",
+                "plugin": "yoast",
+                "metaKey": "_yoast_wpseo_metadesc"
+              }
+            },
+            {
+              "type": "string",
+              "name": "canonical",
+              "label": "Canonical URL",
+              "source": {
+                "kind": "seo",
+                "plugin": "yoast",
+                "metaKey": "_yoast_wpseo_canonical"
+              }
+            },
+            {
+              "type": "image",
+              "name": "og_image",
+              "label": "Social Share Image",
+              "source": {
+                "kind": "seo",
+                "plugin": "yoast",
+                "metaKey": "_yoast_wpseo_opengraph-image"
+              }
+            },
+            {
+              "type": "boolean",
+              "name": "noindex",
+              "label": "Hide from search engines",
+              "source": {
+                "kind": "seo",
+                "plugin": "yoast",
+                "metaKey": "_yoast_wpseo_meta-robots-noindex"
+              }
+            }
+          ]
+        },
+        {
+          "type": "rich-text",
+          "name": "body",
+          "label": "Content",
+          "source": {
+            "kind": "core",
+            "wpField": "post_content"
+          }
+        }
+      ],
+      "unmapped": []
+    },
+    {
+      "name": "page",
+      "label": "Pages",
+      "editor": "block",
+      "fields": [
+        {
+          "type": "string",
+          "name": "title",
+          "label": "Title",
+          "isTitle": true,
+          "required": true,
+          "source": {
+            "kind": "core",
+            "wpField": "post_title"
+          }
+        },
+        {
+          "type": "datetime",
+          "name": "date",
+          "label": "Publish date",
+          "source": {
+            "kind": "core",
+            "wpField": "post_date"
+          }
+        },
+        {
+          "type": "image",
+          "name": "featured_image",
+          "label": "Featured Image",
+          "source": {
+            "kind": "core",
+            "wpField": "_thumbnail_id"
+          }
+        },
+        {
+          "type": "object",
+          "name": "page_hero",
+          "label": "Page Hero",
+          "fields": [
+            {
+              "name": "hero_heading",
+              "label": "Heading",
+              "type": "string",
+              "source": {
+                "kind": "acf",
+                "key": "field_tina_hero_heading",
+                "metaKey": "hero_heading",
+                "acfType": "text"
+              }
+            },
+            {
+              "name": "hero_subheading",
+              "label": "Subheading",
+              "type": "string",
+              "ui": {
+                "component": "textarea"
+              },
+              "source": {
+                "kind": "acf",
+                "key": "field_tina_hero_subheading",
+                "metaKey": "hero_subheading",
+                "acfType": "textarea"
+              }
+            },
+            {
+              "name": "hero_cta",
+              "label": "Call to action",
+              "type": "object",
+              "fields": [
+                {
+                  "type": "string",
+                  "name": "title",
+                  "label": "Link text"
+                },
+                {
+                  "type": "string",
+                  "name": "url",
+                  "label": "URL"
+                },
+                {
+                  "type": "string",
+                  "name": "target",
+                  "label": "Target",
+                  "options": [
+                    "",
+                    "_blank"
+                  ]
+                }
+              ],
+              "source": {
+                "kind": "acf",
+                "key": "field_tina_hero_cta",
+                "metaKey": "hero_cta",
+                "acfType": "link"
+              }
+            },
+            {
+              "name": "hero_background",
+              "label": "Background image",
+              "type": "image",
+              "source": {
+                "kind": "acf",
+                "key": "field_tina_hero_background",
+                "metaKey": "hero_background",
+                "acfType": "image"
+              }
+            },
+            {
+              "name": "hero_colour",
+              "label": "Accent colour",
+              "type": "string",
+              "source": {
+                "kind": "acf",
+                "key": "field_tina_hero_colour",
+                "metaKey": "hero_colour",
+                "acfType": "color_picker"
+              }
+            }
+          ],
+          "source": {
+            "kind": "acf-group",
+            "key": "group_tina_page_hero"
+          }
+        },
+        {
+          "type": "object",
+          "name": "seo",
+          "label": "SEO",
+          "source": {
+            "kind": "seo",
+            "plugin": "yoast"
+          },
+          "fields": [
+            {
+              "type": "string",
+              "name": "title",
+              "label": "SEO Title",
+              "source": {
+                "kind": "seo",
+                "plugin": "yoast",
+                "metaKey": "_yoast_wpseo_title"
+              }
+            },
+            {
+              "type": "string",
+              "name": "description",
+              "label": "Meta Description",
+              "ui": {
+                "component": "textarea"
+              },
+              "source": {
+                "kind": "seo",
+                "plugin": "yoast",
+                "metaKey": "_yoast_wpseo_metadesc"
+              }
+            },
+            {
+              "type": "string",
+              "name": "canonical",
+              "label": "Canonical URL",
+              "source": {
+                "kind": "seo",
+                "plugin": "yoast",
+                "metaKey": "_yoast_wpseo_canonical"
+              }
+            },
+            {
+              "type": "image",
+              "name": "og_image",
+              "label": "Social Share Image",
+              "source": {
+                "kind": "seo",
+                "plugin": "yoast",
+                "metaKey": "_yoast_wpseo_opengraph-image"
+              }
+            },
+            {
+              "type": "boolean",
+              "name": "noindex",
+              "label": "Hide from search engines",
+              "source": {
+                "kind": "seo",
+                "plugin": "yoast",
+                "metaKey": "_yoast_wpseo_meta-robots-noindex"
+              }
+            }
+          ]
+        },
+        {
+          "type": "rich-text",
+          "name": "body",
+          "label": "Content",
+          "source": {
+            "kind": "core",
+            "wpField": "post_content"
+          }
+        }
+      ],
+      "unmapped": []
+    },
+    {
+      "name": "event",
+      "label": "Events",
+      "editor": "block",
+      "fields": [
+        {
+          "type": "string",
+          "name": "title",
+          "label": "Title",
+          "isTitle": true,
+          "required": true,
+          "source": {
+            "kind": "core",
+            "wpField": "post_title"
+          }
+        },
+        {
+          "type": "datetime",
+          "name": "date",
+          "label": "Publish date",
+          "source": {
+            "kind": "core",
+            "wpField": "post_date"
+          }
+        },
+        {
+          "type": "string",
+          "name": "excerpt",
+          "label": "Excerpt",
+          "ui": {
+            "component": "textarea"
+          },
+          "source": {
+            "kind": "core",
+            "wpField": "post_excerpt"
+          }
+        },
+        {
+          "type": "image",
+          "name": "featured_image",
+          "label": "Featured Image",
+          "source": {
+            "kind": "core",
+            "wpField": "_thumbnail_id"
+          }
+        },
+        {
+          "type": "object",
+          "name": "event_type",
+          "label": "Event Types",
+          "list": true,
+          "fields": [
+            {
+              "type": "reference",
+              "name": "item",
+              "label": "Event Type",
+              "collections": [
+                "event_type"
+              ]
+            }
+          ],
+          "source": {
+            "kind": "taxonomy",
+            "taxonomy": "event_type"
+          }
+        },
+        {
+          "type": "object",
+          "name": "event_details",
+          "label": "Event Details",
+          "fields": [
+            {
+              "name": "event_start",
+              "label": "Starts",
+              "required": true,
+              "type": "datetime",
+              "source": {
+                "kind": "acf",
+                "key": "field_tina_event_start",
+                "metaKey": "event_start",
+                "acfType": "date_time_picker"
+              }
+            },
+            {
+              "name": "format",
+              "label": "Format",
+              "type": "string",
+              "options": [
+                {
+                  "value": "in-person",
+                  "label": "In person"
+                },
+                {
+                  "value": "online",
+                  "label": "Online"
+                },
+                {
+                  "value": "hybrid",
+                  "label": "Hybrid"
+                }
+              ],
+              "source": {
+                "kind": "acf",
+                "key": "field_tina_event_format",
+                "metaKey": "format",
+                "acfType": "select"
+              }
+            },
+            {
+              "name": "venue",
+              "label": "Venue",
+              "description": "Building or room name.",
+              "type": "string",
+              "source": {
+                "kind": "acf",
+                "key": "field_tina_event_venue",
+                "metaKey": "venue",
+                "acfType": "text"
+              }
+            },
+            {
+              "name": "location",
+              "label": "Location",
+              "type": "object",
+              "fields": [
+                {
+                  "name": "address",
+                  "label": "Street address",
+                  "type": "string",
+                  "source": {
+                    "kind": "acf",
+                    "key": "field_tina_event_address",
+                    "metaKey": "address",
+                    "acfType": "text"
+                  }
+                },
+                {
+                  "name": "city",
+                  "label": "City",
+                  "type": "string",
+                  "source": {
+                    "kind": "acf",
+                    "key": "field_tina_event_city",
+                    "metaKey": "city",
+                    "acfType": "text"
+                  }
+                }
+              ],
+              "source": {
+                "kind": "acf",
+                "key": "field_tina_event_location",
+                "metaKey": "location",
+                "acfType": "group"
+              }
+            },
+            {
+              "name": "ticket_url",
+              "label": "Ticket URL",
+              "type": "string",
+              "source": {
+                "kind": "acf",
+                "key": "field_tina_event_tickets",
+                "metaKey": "ticket_url",
+                "acfType": "url"
+              }
+            },
+            {
+              "name": "price",
+              "label": "Price (AUD)",
+              "type": "number",
+              "source": {
+                "kind": "acf",
+                "key": "field_tina_event_price",
+                "metaKey": "price",
+                "acfType": "number"
+              }
+            },
+            {
+              "name": "is_free",
+              "label": "Free event",
+              "type": "boolean",
+              "source": {
+                "kind": "acf",
+                "key": "field_tina_event_free",
+                "metaKey": "is_free",
+                "acfType": "true_false"
+              }
+            },
+            {
+              "type": "object",
+              "name": "speakers",
+              "label": "Speakers",
+              "list": true,
+              "fields": [
+                {
+                  "type": "reference",
+                  "name": "item",
+                  "label": "Speaker",
+                  "collections": [
+                    "team_member"
+                  ]
+                }
+              ],
+              "source": {
+                "kind": "acf",
+                "key": "field_tina_event_speakers",
+                "metaKey": "speakers",
+                "acfType": "relationship"
+              }
+            },
+            {
+              "name": "agenda",
+              "label": "Agenda",
+              "type": "rich-text",
+              "source": {
+                "kind": "acf",
+                "key": "field_tina_event_agenda",
+                "metaKey": "agenda",
+                "acfType": "wysiwyg"
+              }
+            }
+          ],
+          "source": {
+            "kind": "acf-group",
+            "key": "group_tina_event_details"
+          }
+        },
+        {
+          "type": "object",
+          "name": "seo",
+          "label": "SEO",
+          "source": {
+            "kind": "seo",
+            "plugin": "yoast"
+          },
+          "fields": [
+            {
+              "type": "string",
+              "name": "title",
+              "label": "SEO Title",
+              "source": {
+                "kind": "seo",
+                "plugin": "yoast",
+                "metaKey": "_yoast_wpseo_title"
+              }
+            },
+            {
+              "type": "string",
+              "name": "description",
+              "label": "Meta Description",
+              "ui": {
+                "component": "textarea"
+              },
+              "source": {
+                "kind": "seo",
+                "plugin": "yoast",
+                "metaKey": "_yoast_wpseo_metadesc"
+              }
+            },
+            {
+              "type": "string",
+              "name": "canonical",
+              "label": "Canonical URL",
+              "source": {
+                "kind": "seo",
+                "plugin": "yoast",
+                "metaKey": "_yoast_wpseo_canonical"
+              }
+            },
+            {
+              "type": "image",
+              "name": "og_image",
+              "label": "Social Share Image",
+              "source": {
+                "kind": "seo",
+                "plugin": "yoast",
+                "metaKey": "_yoast_wpseo_opengraph-image"
+              }
+            },
+            {
+              "type": "boolean",
+              "name": "noindex",
+              "label": "Hide from search engines",
+              "source": {
+                "kind": "seo",
+                "plugin": "yoast",
+                "metaKey": "_yoast_wpseo_meta-robots-noindex"
+              }
+            }
+          ]
+        },
+        {
+          "type": "rich-text",
+          "name": "body",
+          "label": "Content",
+          "source": {
+            "kind": "core",
+            "wpField": "post_content"
+          }
+        }
+      ],
+      "unmapped": []
+    },
+    {
+      "name": "team_member",
+      "label": "Team",
+      "editor": "classic",
+      "fields": [
+        {
+          "type": "string",
+          "name": "title",
+          "label": "Title",
+          "isTitle": true,
+          "required": true,
+          "source": {
+            "kind": "core",
+            "wpField": "post_title"
+          }
+        },
+        {
+          "type": "datetime",
+          "name": "date",
+          "label": "Publish date",
+          "source": {
+            "kind": "core",
+            "wpField": "post_date"
+          }
+        },
+        {
+          "type": "image",
+          "name": "featured_image",
+          "label": "Featured Image",
+          "source": {
+            "kind": "core",
+            "wpField": "_thumbnail_id"
+          }
+        },
+        {
+          "type": "object",
+          "name": "profile",
+          "label": "Profile",
+          "fields": [
+            {
+              "name": "role",
+              "label": "Role",
+              "required": true,
+              "type": "string",
+              "source": {
+                "kind": "acf",
+                "key": "field_tina_team_role",
+                "metaKey": "role",
+                "acfType": "text"
+              }
+            },
+            {
+              "name": "bio",
+              "label": "Short bio",
+              "type": "string",
+              "ui": {
+                "component": "textarea"
+              },
+              "source": {
+                "kind": "acf",
+                "key": "field_tina_team_bio",
+                "metaKey": "bio",
+                "acfType": "textarea"
+              }
+            },
+            {
+              "name": "headshot",
+              "label": "Headshot",
+              "type": "image",
+              "source": {
+                "kind": "acf",
+                "key": "field_tina_team_headshot",
+                "metaKey": "headshot",
+                "acfType": "image"
+              }
+            },
+            {
+              "name": "email",
+              "label": "Email",
+              "type": "string",
+              "source": {
+                "kind": "acf",
+                "key": "field_tina_team_email",
+                "metaKey": "email",
+                "acfType": "email"
+              }
+            },
+            {
+              "name": "linkedin",
+              "label": "LinkedIn",
+              "type": "string",
+              "source": {
+                "kind": "acf",
+                "key": "field_tina_team_linkedin",
+                "metaKey": "linkedin",
+                "acfType": "url"
+              }
+            },
+            {
+              "name": "skills",
+              "label": "Skills",
+              "type": "string",
+              "list": true,
+              "options": [
+                {
+                  "value": "dotnet",
+                  "label": ".NET"
+                },
+                {
+                  "value": "react",
+                  "label": "React"
+                },
+                {
+                  "value": "azure",
+                  "label": "Azure"
+                },
+                {
+                  "value": "ai",
+                  "label": "AI"
+                }
+              ],
+              "source": {
+                "kind": "acf",
+                "key": "field_tina_team_skills",
+                "metaKey": "skills",
+                "acfType": "checkbox"
+              }
+            },
+            {
+              "name": "started",
+              "label": "Started at SSW",
+              "type": "datetime",
+              "source": {
+                "kind": "acf",
+                "key": "field_tina_team_started",
+                "metaKey": "started",
+                "acfType": "date_picker"
+              }
+            }
+          ],
+          "source": {
+            "kind": "acf-group",
+            "key": "group_tina_team_profile"
+          }
+        },
+        {
+          "type": "object",
+          "name": "seo",
+          "label": "SEO",
+          "source": {
+            "kind": "seo",
+            "plugin": "yoast"
+          },
+          "fields": [
+            {
+              "type": "string",
+              "name": "title",
+              "label": "SEO Title",
+              "source": {
+                "kind": "seo",
+                "plugin": "yoast",
+                "metaKey": "_yoast_wpseo_title"
+              }
+            },
+            {
+              "type": "string",
+              "name": "description",
+              "label": "Meta Description",
+              "ui": {
+                "component": "textarea"
+              },
+              "source": {
+                "kind": "seo",
+                "plugin": "yoast",
+                "metaKey": "_yoast_wpseo_metadesc"
+              }
+            },
+            {
+              "type": "string",
+              "name": "canonical",
+              "label": "Canonical URL",
+              "source": {
+                "kind": "seo",
+                "plugin": "yoast",
+                "metaKey": "_yoast_wpseo_canonical"
+              }
+            },
+            {
+              "type": "image",
+              "name": "og_image",
+              "label": "Social Share Image",
+              "source": {
+                "kind": "seo",
+                "plugin": "yoast",
+                "metaKey": "_yoast_wpseo_opengraph-image"
+              }
+            },
+            {
+              "type": "boolean",
+              "name": "noindex",
+              "label": "Hide from search engines",
+              "source": {
+                "kind": "seo",
+                "plugin": "yoast",
+                "metaKey": "_yoast_wpseo_meta-robots-noindex"
+              }
+            }
+          ]
+        }
+      ],
+      "unmapped": []
+    }
+  ],
+  "taxonomies": [
+    {
+      "name": "category",
+      "label": "Categories",
+      "hierarchical": true,
+      "postTypes": [
+        "post"
+      ]
+    },
+    {
+      "name": "post_tag",
+      "label": "Tags",
+      "hierarchical": false,
+      "postTypes": [
+        "post"
+      ]
+    },
+    {
+      "name": "event_type",
+      "label": "Event Types",
+      "hierarchical": true,
+      "postTypes": [
+        "event"
+      ]
+    }
+  ],
+  "plugins": {
+    "acf": true,
+    "yoast": true,
+    "rankMath": false,
+    "active": [
+      "advanced-custom-fields",
+      "wordpress-seo"
+    ]
+  }
+}

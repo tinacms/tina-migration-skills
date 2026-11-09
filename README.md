@@ -14,17 +14,19 @@ Early. First skill — `wordpress-to-tinacms` — is in progress. See issue [tin
 tina-migration-skills/
 ├── README.md                                   # this file
 ├── LICENSE                                     # MIT
-└── skills/
-    ├── wordpress-to-tinacms/
-    │   ├── SKILL.md                            # orchestrator prompt the AI loads
-    │   ├── discovery.md                        # questions asked up front
-    │   ├── admin-tour.md                       # how the schema is derived from /wp-admin
-    │   ├── schema-mapping.md                   # WP field type → Tina field type reference
-    │   ├── scripts/
-    │   │   └── wp-admin-tour.ts                # reference Playwright script
-    │   └── examples/
-    │       └── <case-study>.md                 # worked examples from real migrations
-    └── (future skills follow the same shape)
+├── skills/
+│   ├── wordpress-to-tinacms/
+│   │   ├── SKILL.md                            # orchestrator prompt the AI loads
+│   │   ├── discovery.md                        # questions asked up front
+│   │   ├── admin-tour.md                       # how the schema is derived from /wp-admin
+│   │   ├── schema-mapping.md                   # WP field type → Tina field type reference
+│   │   ├── scripts/
+│   │   │   └── wp-admin-tour.ts                # Playwright tour of /wp-admin
+│   │   └── examples/
+│   │       └── <case-study>.md                 # worked examples from real migrations
+│   └── (future skills follow the same shape)
+└── test-sites/
+    └── wordpress/                              # Docker WordPress + ACF + Yoast for testing the skill
 ```
 
 ## Naming conventions
@@ -51,6 +53,8 @@ Every skill folder contains:
 | `schema-mapping.md` | Reference table — source field types → TinaCMS field types. |
 | `scripts/*.ts` | Reference automation scripts (Playwright tours, transformers). |
 | `examples/<case-study>.md` | Walkthroughs of real migrations run with this skill. |
+
+Where possible, a skill also gets a disposable local copy of the source CMS under `test-sites/<source>/`, so it can be tested without a client site or real credentials.
 
 ### Repo name
 

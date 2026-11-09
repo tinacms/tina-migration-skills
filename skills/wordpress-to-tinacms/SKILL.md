@@ -39,24 +39,27 @@ Install Playwright locally:
 
 ```bash
 npm init -y
-npm i -D playwright @types/node typescript tsx
+npm i -D playwright dotenv @types/node typescript tsx
 npx playwright install chromium
 ```
 
 Copy `scripts/wp-admin-tour.ts` from this skill into `migration/`. Run it:
 
 ```bash
-tsx migration/wp-admin-tour.ts
+npx tsx migration/wp-admin-tour.ts
 ```
 
-The script logs in, walks the admin menu, visits each post type's **Add New** screen, and emits a JSON manifest at `migration/schema.json` describing every post type and its fields. See `admin-tour.md` for exactly what the script does and how to extend it for custom plugins.
+The script logs in, walks the admin menu, visits each post type's **Add New** screen, reads ACF field groups and SEO plugin metaboxes, and emits a JSON manifest at `migration/schema.json` describing every post type and its fields. See `admin-tour.md` for exactly what the script does and how to extend it for custom plugins.
 
 Review `migration/schema.json` with the user before generating any TinaCMS code. Flag:
 
 - Post types with zero fields other than title/body — likely plain pages, maps to a simple Tina collection
-- Post types backed by **ACF** (Advanced Custom Fields) or similar — the field manifest tells you exactly what to replicate
-- Taxonomies — map to Tina `reference` fields or `string` with `options`
-- Yoast / Rank Math SEO fields — map to a Tina `seo` object
+- **ACF** field groups — each one becomes a Tina `object` field named after the group, so editors see the same panels they see in WordPress
+- Yoast / Rank Math — a single `seo` object on each post type that shows the SEO metabox
+- Anything in a post type's `unmapped` list — a metabox the tour saw but couldn't type. Ask the user what it is; don't guess
+- Anything the tour logged as `SKIPPED` (passwords, user fields, ACF clone fields)
+
+Each field in `schema.json` carries a `source` key saying where its value lives in WordPress (`post_title`, an ACF meta key, a Yoast meta key…). Use it in step 8 and strip it when writing the Tina collection files.
 
 ## 4. Map WordPress fields to TinaCMS collections
 
@@ -116,7 +119,7 @@ Convert each `<item>` in `wp-export.xml` into a Markdown file under the matching
 - `<wp:post_name>` → filename slug (`.mdx`)
 - `<wp:status>publish</wp:status>` only — skip drafts unless the user asks
 - `<content:encoded>` → body (strip Gutenberg block comments, convert HTML to Markdown)
-- `<wp:postmeta>` → frontmatter fields (match the names in the generated schema)
+- `<wp:postmeta>` → frontmatter fields: match each `<wp:meta_key>` to a field's `source.metaKey` in `schema.json`. ACF values go inside their field group's object (e.g. `venue` → `event_details.venue`)
 - `<wp:attachment>` entries → download referenced images to `public/uploads/`, rewrite `<img src>` paths
 
 ## 9. Verify locally
@@ -154,5 +157,6 @@ Produce `MIGRATION-SUMMARY.md` in the new project with:
 - Schema derivation deep-dive: `admin-tour.md`
 - WordPress field type → TinaCMS field type table: `schema-mapping.md`
 - Reference Playwright tour script: `scripts/wp-admin-tour.ts`
+- Local WordPress test site (ACF + Yoast, for trying the skill without a client site): `test-sites/wordpress/` in this repo
 - Case study: `examples/81military-com-au.md`
 - Existing manual guide (content-only, no schema derivation): https://tina.io/docs/guides/converting-wordpress-to-tina
