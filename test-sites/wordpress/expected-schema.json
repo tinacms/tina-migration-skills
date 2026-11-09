@@ -1,6 +1,6 @@
 {
   "siteUrl": "http://localhost:8080",
-  "wpVersion": "7.1.3",
+  "wpVersion": "7.1.4",
   "site": {
     "title": "Tina WP Test Site",
     "tagline": "",
@@ -903,7 +903,16 @@
       "hierarchical": true,
       "postTypes": [
         "post"
-      ]
+      ],
+      "rewrite": {
+        "base": "category",
+        "hierarchical": false
+      },
+      "termUrls": {
+        "news": "/category/news/",
+        "releases": "/category/releases/",
+        "uncategorized": "/category/uncategorized/"
+      }
     },
     {
       "name": "post_tag",
@@ -911,7 +920,16 @@
       "hierarchical": false,
       "postTypes": [
         "post"
-      ]
+      ],
+      "rewrite": {
+        "base": "tag",
+        "hierarchical": false
+      },
+      "termUrls": {
+        "astro": "/tag/astro/",
+        "release": "/tag/release/",
+        "tinacms": "/tag/tinacms/"
+      }
     },
     {
       "name": "event_type",
@@ -919,7 +937,15 @@
       "hierarchical": true,
       "postTypes": [
         "event"
-      ]
+      ],
+      "rewrite": {
+        "base": "event_type",
+        "hierarchical": false
+      },
+      "termUrls": {
+        "conference": "/event_type/conference/",
+        "meetup": "/event_type/meetup/"
+      }
     }
   ],
   "plugins": {
