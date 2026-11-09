@@ -10,7 +10,8 @@
  *   src/lib/wordpress.json                    front page + posts page (merged)
  *   migration/transform-report.json           counts, skips and URL mismatches
  *
- * Only published items are migrated unless you pass --drafts.
+ * Only published items are migrated unless you pass --drafts. Password-protected
+ * items are never migrated: they would become public. The report lists them.
  *
  * Usage (from the project root, after generate-collections.ts):
  *   migration/node_modules/.bin/tsx migration/transform-content.ts
@@ -44,6 +45,7 @@ type Item = {
   id: number;
   type: string;
   status: string;
+  password: string;
   slug: string;
   title: string;
   link: string;
@@ -62,6 +64,8 @@ const taxonomyCollection = (tax: string) => toTinaName(tax === 'post_tag' ? 'tag
 const report = {
   migrated: {} as Record<string, number>,
   skipped: [] as string[],
+  /** Published behind a WordPress password. Not migrated: the new site has no equivalent, so someone has to decide. */
+  passwordProtected: [] as string[],
   media: 0,
   urlMismatches: [] as { old: string; new: string }[],
   warnings: [] as string[],
@@ -141,6 +145,7 @@ function parseExport(xml: string) {
     id: Number(text(it['wp:post_id'])),
     type: text(it['wp:post_type']),
     status: text(it['wp:status']),
+    password: text(it['wp:post_password']),
     slug: text(it['wp:post_name']),
     title: text(it.title),
     link: text(it.link),
@@ -177,7 +182,8 @@ function transform(manifest: Manifest, data: ReturnType<typeof parseExport>, rou
   const byId = new Map(data.items.map((i) => [i.id, i]));
   const termById = new Map(data.terms.map((t) => [t.id, t]));
   const postTypeNames = new Set(manifest.postTypes.map((p) => p.name));
-  const migratable = (i: Item) => postTypeNames.has(i.type) && i.slug && (i.status === 'publish' || (INCLUDE_DRAFTS && i.status === 'draft'));
+  const inScope = (i: Item) => postTypeNames.has(i.type) && i.slug && (i.status === 'publish' || (INCLUDE_DRAFTS && i.status === 'draft'));
+  const migratable = (i: Item) => inScope(i) && !i.password;
 
   // Media: every attachment plus any other wp-content/uploads URL the content points at.
   const media = new Map<string, string>(); // remote URL → local /uploads/... path
@@ -368,6 +374,10 @@ function transform(manifest: Manifest, data: ReturnType<typeof parseExport>, rou
   const files = new Map<string, string>();
   for (const item of data.items) {
     if (!postTypeNames.has(item.type)) continue;
+    if (inScope(item) && item.password) {
+      report.passwordProtected.push(`${item.type}/${item.slug}`);
+      continue;
+    }
     if (!migratable(item)) {
       if (item.status !== 'auto-draft' && item.status !== 'inherit') report.skipped.push(`${item.type}/${item.slug || item.id} (${item.status})`);
       continue;
@@ -392,7 +402,12 @@ function transform(manifest: Manifest, data: ReturnType<typeof parseExport>, rou
   // Nav: the first WordPress menu, in order. Fall back to Home + top-level pages.
   const menuItems = data.items.filter((i) => i.type === 'nav_menu_item' && i.status === 'publish');
   const firstMenu = menuItems[0]?.terms.find((t) => t.domain === 'nav_menu')?.slug;
+  const linksToSkippedEntry = (i: Item) => {
+    const target = byId.get(Number(i.meta.get('_menu_item_object_id')));
+    return i.meta.get('_menu_item_type') === 'post_type' && !!target && !migratable(target);
+  };
   const nav = menuItems
+    .filter((i) => !linksToSkippedEntry(i))
     .filter((i) => i.terms.some((t) => t.domain === 'nav_menu' && t.slug === firstMenu) && i.meta.get('_menu_item_menu_item_parent') === '0')
     .sort((a, b) => a.menuOrder - b.menuOrder)
     .map((i) => {
@@ -474,6 +489,7 @@ async function main(): Promise<void> {
   console.log(`[transform] migrated: ${Object.entries(report.migrated).map(([k, v]) => `${v} ${k}`).join(', ')}`);
   console.log(`[transform] media: ${report.media} files → public/uploads/`);
   if (report.skipped.length) console.log(`[transform] skipped: ${report.skipped.join(', ')}`);
+  for (const p of report.passwordProtected) console.warn(`[transform]   NEEDS A DECISION: ${p} is password-protected, so it was not migrated`);
   for (const m of report.urlMismatches) console.warn(`[transform]   URL CHANGED: ${m.old} → ${m.new} (add a redirect)`);
   for (const w of report.warnings) console.warn(`[transform]   WARNING: ${w}`);
   console.log('[transform] report written to migration/transform-report.json');
