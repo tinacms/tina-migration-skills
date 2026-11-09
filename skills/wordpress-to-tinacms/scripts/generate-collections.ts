@@ -57,7 +57,7 @@ const warnings: string[] = [];
 /** Turn a WordPress permalink structure into a route pattern for posts. */
 function postPattern(structure: string): string {
   if (!structure) {
-    warnings.push('Plain permalinks (?p=123) — posts get /:path/ URLs. Add redirects from the old ?p= URLs.');
+    warnings.push('Plain permalinks (?p=123) — posts get /:path/ URLs. Astro can\'t redirect query-string URLs, so transform-content.ts stops unless you pass --accept-lost-query-urls.');
     return '/:path/';
   }
   const supported = { '%postname%': ':path', '%year%': ':year', '%monthnum%': ':month', '%day%': ':day' } as Record<string, string>;

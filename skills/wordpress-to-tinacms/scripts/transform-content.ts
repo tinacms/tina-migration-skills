@@ -25,6 +25,7 @@ import { stringify as toYaml } from 'yaml';
 
 const ROOT = process.cwd();
 const INCLUDE_DRAFTS = process.argv.includes('--drafts');
+const ACCEPT_LOST_QUERY_URLS = process.argv.includes('--accept-lost-query-urls');
 
 type FieldSource =
   | { kind: 'core'; wpField: string }
@@ -71,6 +72,8 @@ const report = {
   passwordProtected: [] as string[],
   media: 0,
   urlMismatches: [] as { old: string; new: string }[],
+  /** Old URLs that depend on a query string (/?p=123). Astro's redirects can't match these. */
+  queryUrls: [] as { old: string; new: string }[],
   warnings: [] as string[],
 };
 
@@ -395,8 +398,10 @@ function transform(manifest: Manifest, data: ReturnType<typeof parseExport>, rou
     if (/:(year|month|day)/.test(routes[toTinaName(item.type)]?.pattern ?? '')) fm.permalink_date = permalinkDate(item);
     files.set(docFile(item), `---\n${toYaml(fm, { lineWidth: 0 })}---\n\n${body}\n`);
     report.migrated[item.type] = (report.migrated[item.type] ?? 0) + 1;
-    const oldPath = item.link ? new URL(item.link).pathname : '';
+    const oldUrl = item.link ? new URL(item.link) : undefined;
+    const oldPath = oldUrl?.search ? '' : oldUrl?.pathname;
     const nextPath = newUrl(item);
+    if (oldUrl?.search) report.queryUrls.push({ old: oldUrl.pathname + oldUrl.search, new: nextPath });
     if (oldPath && oldPath !== nextPath) report.urlMismatches.push({ old: oldPath, new: nextPath });
   }
 
@@ -462,6 +467,14 @@ async function main(): Promise<void> {
   const data = parseExport(await readFile(path.join(ROOT, 'migration/wp-export.xml'), 'utf8'));
   const result = transform(manifest, data, wordpressJson.routes);
 
+  if (report.queryUrls.length && !ACCEPT_LOST_QUERY_URLS) {
+    throw new Error(
+      `Stopped before writing anything: ${report.queryUrls.length} entries have query-string URLs, like ${report.queryUrls[0].old}. ` +
+        'Astro\'s redirects match paths only, so these old links can\'t be preserved on the new site. ' +
+        'To go ahead, run again with --accept-lost-query-urls. The report then lists them as queryUrls, ready to turn into rules on the host.'
+    );
+  }
+
   for (const [rel, content] of result.files) await writeAt(rel, content);
 
   for (const [url, local] of result.media) {
@@ -500,6 +513,7 @@ async function main(): Promise<void> {
   if (report.skipped.length) console.log(`[transform] skipped: ${report.skipped.join(', ')}`);
   for (const p of report.passwordProtected) console.warn(`[transform]   NEEDS A DECISION: ${p} is password-protected, so it was not migrated`);
   for (const m of report.urlMismatches) console.warn(`[transform]   URL CHANGED: ${m.old} → ${m.new} (add a redirect)`);
+  if (report.queryUrls.length) console.warn(`[transform]   NOT REDIRECTED: ${report.queryUrls.length} query-string URLs. See queryUrls in the report; they need rules on the host.`);
   for (const w of report.warnings) console.warn(`[transform]   WARNING: ${w}`);
   console.log('[transform] report written to migration/transform-report.json');
 }
