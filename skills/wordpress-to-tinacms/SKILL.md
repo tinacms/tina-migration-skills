@@ -197,7 +197,7 @@ cp -R "${CLAUDE_SKILL_DIR}"/templates/astro/. .
 node -e 'const f="tsconfig.json",t=JSON.parse(require("fs").readFileSync(f));t.exclude.push("migration");require("fs").writeFileSync(f,JSON.stringify(t,null,2)+"\n")'
 ```
 
-The templates replace `tina/config.ts`, `src/lib/data.ts` and `src/lib/islands.ts`, and add:
+The templates replace `tina/config.ts`, `src/lib/data.ts`, `src/lib/islands.ts`, `src/layouts/Base.astro` and `src/components/BaseHead.astro` (these two also take the migrated `noindex` and `canonical`), and add:
 
 - `src/pages/[...path].astro`, a single route for every entry, the homepage, the posts page, CPT archives and term pages
 - a generic `Entry` / `EntryList` / `FieldValue` set of components that renders every field using the labels from the WordPress editor
@@ -216,14 +216,18 @@ What it does:
   - Gutenberg markup becomes Markdown.
   - ACF values go into their group objects, and PHP-serialized arrays (checkboxes, relationships, links) are decoded.
   - Relationships become references, and Yoast / Rank Math meta becomes `seo`.
-- **Terms:** writes taxonomy terms to `src/content/<taxonomy>/<slug>.json`.
+- **Terms:** writes taxonomy terms to `src/content/<taxonomy>/<slug>.json`, nested under their parent when the WordPress URLs nest.
 - **Media:** downloads it to `public/uploads/`, keeping WordPress's paths, and rewrites the URLs.
 - **Site settings:**
   - Merges the site title, tagline and the first WordPress menu into `src/content/config/config.json`.
   - Records the front page and posts page in `src/lib/wordpress.json`.
 - **Redirects:** writes `redirects` in `astro.config.mjs`, so the front page's slug goes to `/` and every URL that changed goes to its new address.
 
-`migration/transform-report.json` lists every new URL, the URLs that changed, entries skipped (drafts), approved comments (not migrated), and warnings (resolved SEO template variables, failed media downloads).
+`migration/transform-report.json` lists every new URL, the URLs that changed, entries skipped (drafts), password-protected entries (never migrated, because they would become public), approved comments (not migrated), files removed because their entry is gone, and warnings (resolved SEO template variables, failed media downloads).
+
+**Plain permalinks.** If entries have query-string URLs (`/?p=123`), the transform stops before writing anything, because Astro's redirects match paths only. Put it on the **Needs a decision** list: those old links can't be preserved by the site. If the user accepts that, run it again with `--accept-lost-query-urls`, and the report lists them as `queryUrls` for rules on the host.
+
+**Running it again** is safe. Files from the last run that are no longer produced are removed, unless they were edited since (those are kept, with a warning). Files the transform never wrote aren't touched. Changes made to a file it does still produce are overwritten.
 
 ## 8. Build, start and check
 
@@ -254,7 +258,7 @@ Write `MIGRATION-SUMMARY.md` in the project:
 - **What the tour found** (link `migration/schema.json`): post types, ACF groups, SEO plugin. If the schema came from `--from-export`, say it was projected, not observed.
 - **What was migrated**, from `migration/transform-report.json`: entries per post type, terms, media files.
 - **Changed URLs**, and that each one already redirects.
-- **Needs a decision:** everything collected in step 4, plus generator and transform warnings. Write "Nothing" if it's empty.
+- **Needs a decision:** everything collected in step 4, plus password-protected entries and generator and transform warnings. Write "Nothing" if it's empty.
 - **Known gaps:** the public pages are generic placeholders for the team to design. Migrated entries are edited in the `/admin` form; only the header and footer are click-to-edit.
 - **Run it again later:** `pnpm install`, `pnpm dev`, then `http://localhost:4321/admin`.
 - **Going live**, filled in for this site:
