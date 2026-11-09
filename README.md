@@ -21,7 +21,10 @@ tina-migration-skills/
 │   │   ├── admin-tour.md                       # how the schema is derived from /wp-admin
 │   │   ├── schema-mapping.md                   # WP field type → Tina field type reference
 │   │   ├── scripts/
-│   │   │   └── wp-admin-tour.ts                # Playwright tour of /wp-admin
+│   │   │   ├── wp-admin-tour.ts                # Playwright tour of /wp-admin → schema.json + export
+│   │   │   ├── generate-collections.ts         # schema.json → tina/collections/*.ts
+│   │   │   └── transform-content.ts            # wp-export.xml → MDX/JSON content + media
+│   │   ├── templates/astro/                    # generic Astro routes that replace the starter's demo model
 │   │   └── examples/
 │   │       └── <case-study>.md                 # worked examples from real migrations
 │   └── (future skills follow the same shape)
@@ -51,7 +54,8 @@ Every skill folder contains:
 | `discovery.md` | The questions the skill asks the user up front, before doing any work. See [Discovery first](#discovery-first). |
 | `admin-tour.md` *(or similar)* | How the skill derives its target schema from the source — observation of the source CMS's editor, not scraping or exports. |
 | `schema-mapping.md` | Reference table — source field types → TinaCMS field types. |
-| `scripts/*.ts` | Reference automation scripts (Playwright tours, transformers). |
+| `scripts/*.ts` | Automation scripts (Playwright tours, generators, transformers). |
+| `templates/<framework>/` | Files copied into the new project (routes, components, config). |
 | `examples/<case-study>.md` | Walkthroughs of real migrations run with this skill. |
 
 Where possible, a skill also gets a disposable local copy of the source CMS under `test-sites/<source>/`, so it can be tested without a client site or real credentials.
@@ -68,7 +72,7 @@ The goal of a migration isn't just to move the content — it's to give editors 
 
 ### Local-first delivery
 
-Skills produce a **working local project** — `yarn dev` runs it, `localhost:4321/admin` is the editor. TinaCloud, hosting, DNS, and SEO cutover are deliberately out of scope. Those are decisions the team makes separately once they're happy with the local pilot.
+Skills produce a **working local project** — `pnpm dev` runs it, `localhost:4321/admin` is the editor. TinaCloud, hosting, DNS, and SEO cutover are deliberately out of scope. Those are decisions the team makes separately once they're happy with the local pilot.
 
 ### Discovery first
 

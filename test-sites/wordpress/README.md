@@ -7,9 +7,11 @@ A disposable local WordPress for developing and testing the [`wordpress-to-tinac
 | | Editor | What it exercises |
 |---|---|---|
 | **Posts** | Block | Categories, tags, featured image, excerpt, Yoast SEO, one draft (should be skipped) |
-| **Pages** | Block | ACF "Page Hero" group (text, textarea, link, image, colour picker), Yoast `noindex` |
+| **Pages** | Block | ACF "Page Hero" group (text, textarea, link, image, colour picker), Yoast `noindex`, static front page ("Home") and posts page ("News") |
 | **Events** (`event`) | Block | Custom post type + hierarchical custom taxonomy `event_type`, ACF "Event Details" group (date-time, select with labels, nested group, URL, number, true/false, relationship → Team, WYSIWYG, tabs) |
 | **Team** (`team_member`) | Classic | No body field, ACF "Profile" group (message, required text, textarea, image, email, checkbox, date, password → should be skipped) |
+
+Plus a "Main" menu (Home, About us, News, Events) and a post with an inline image, curly braces and inline code, which MDX is picky about.
 
 Plugins: [ACF](https://wordpress.org/plugins/advanced-custom-fields/) (free) and [Yoast SEO](https://wordpress.org/plugins/wordpress-seo/), latest from wordpress.org. The post types live in [`mu-plugins/content-model.php`](mu-plugins/content-model.php). The ACF field groups are in [`seed/acf-field-groups.json`](seed/acf-field-groups.json), imported the same way ACF → Tools → Import does, so they behave like groups created in the UI.
 
@@ -29,7 +31,11 @@ Then open http://localhost:8080/wp-admin. The login is `admin` / `tina-test-only
 docker compose down -v
 ```
 
-## Test the admin tour against it
+## Run the whole skill against it
+
+Follow [`SKILL.md`](../../skills/wordpress-to-tinacms/SKILL.md) with `WP_ADMIN_URL=http://localhost:8080/wp-admin`. The [test-site case study](../../skills/wordpress-to-tinacms/examples/test-site.md) shows the expected results.
+
+## Test just the admin tour
 
 From an empty working directory:
 

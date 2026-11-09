@@ -15,13 +15,12 @@
  * ACF 6.8 free, Yoast SEO 28.7). Rank Math detection is untested. Run with
  * HEADLESS=false to watch it the first time on a new site.
  *
- * Usage (from the migration working directory):
- *   npm i -D playwright dotenv @types/node typescript tsx
- *   npx playwright install chromium
- *   npx tsx migration/wp-admin-tour.ts
+ * Usage (from the project root):
+ *   migration/node_modules/.bin/tsx migration/wp-admin-tour.ts --check   # login + permissions only, writes nothing
+ *   migration/node_modules/.bin/tsx migration/wp-admin-tour.ts           # full tour
  */
 
-import { chromium, Page } from 'playwright';
+import { chromium, type Page } from 'playwright';
 import { readFile, writeFile } from 'node:fs/promises';
 import { config as loadEnv } from 'dotenv';
 import path from 'node:path';
@@ -33,6 +32,7 @@ const WP_ADMIN_URL = process.env.WP_ADMIN_URL?.replace(/\/$/, '');
 const WP_USERNAME = process.env.WP_USERNAME;
 const WP_PASSWORD = process.env.WP_PASSWORD;
 const HEADLESS = process.env.HEADLESS !== 'false';
+const CHECK_ONLY = process.argv.includes('--check');
 
 if (!WP_ADMIN_URL || !WP_USERNAME || !WP_PASSWORD) {
   throw new Error('Missing WP_ADMIN_URL / WP_USERNAME / WP_PASSWORD in migration/.env.local');
@@ -85,12 +85,31 @@ type PostTypeSchema = {
   unmapped: { id: string; title: string }[];
 };
 
-type Taxonomy = { name: string; label: string; hierarchical: boolean; postTypes: string[] };
+type Taxonomy = {
+  name: string;
+  label: string;
+  hierarchical: boolean;
+  postTypes: string[];
+  /** How WordPress builds this taxonomy's URLs, read from its term links. Missing = no links seen; WordPress's defaults apply. */
+  rewrite?: { base: string; hierarchical: boolean };
+  /** Term slug → URL path on the WordPress site. */
+  termUrls?: Record<string, string>;
+};
+
+type SiteSettings = {
+  title: string;
+  tagline: string;
+  /** Settings → Permalinks, e.g. `/%postname%/`. Empty string = plain `?p=123` links. */
+  permalinkStructure: string;
+  /** Settings → Reading. `page` = a static page is the homepage. */
+  frontPage: { show: 'posts' } | { show: 'page'; pageId: number; postsPageId?: number };
+};
 
 type Manifest = {
   generatedAt: string;
   siteUrl: string;
   wpVersion?: string;
+  site: SiteSettings;
   postTypes: PostTypeSchema[];
   taxonomies: Taxonomy[];
   plugins: { acf: boolean; yoast: boolean; rankMath: boolean; active: string[] };
@@ -141,9 +160,48 @@ async function login(page: Page): Promise<void> {
   }
 }
 
+/**
+ * Admin screens the tour needs. Each is only in the admin menu when the account can use it,
+ * so an Editor login (which can sign in fine) is caught here instead of halfway through the tour.
+ */
+const REQUIRED_SCREENS = [
+  { href: 'plugins.php', needFor: 'plugin detection' },
+  { href: 'export.php', needFor: 'the content export' },
+  { href: 'options-general.php', needFor: 'site settings' },
+];
+
+/** Fail fast unless the account can open every screen the tour needs. `--check` stops after this. */
+async function checkAccess(page: Page): Promise<void> {
+  const missing = [];
+  for (const screen of REQUIRED_SCREENS) {
+    if ((await page.locator(`#adminmenu a[href$="${screen.href}"]`).count()) === 0) missing.push(screen);
+  }
+  if (missing.length) {
+    throw new Error(
+      `Logged in, but this account can't open ${missing.map((m) => `${m.href} (needed for ${m.needFor})`).join(', ')}. ` +
+        'Use an Administrator account for the migration.'
+    );
+  }
+}
+
 async function detectWpVersion(page: Page): Promise<string | undefined> {
   const footer = await page.locator('#footer-upgrade').textContent().catch(() => null);
   return footer?.match(/([\d]+\.[\d.]+)/)?.[1];
+}
+
+/** Settings → General / Permalinks / Reading. Read-only: the forms are never submitted. */
+async function readSiteSettings(page: Page): Promise<SiteSettings> {
+  await page.goto(`${WP_ADMIN_URL}/options-general.php`);
+  const title = await page.inputValue('#blogname');
+  const tagline = await page.inputValue('#blogdescription');
+  await page.goto(`${WP_ADMIN_URL}/options-permalink.php`);
+  const permalinkStructure = await page.inputValue('#permalink_structure').catch(() => '');
+  await page.goto(`${WP_ADMIN_URL}/options-reading.php`);
+  const show = await page.locator('input[name="show_on_front"]:checked').inputValue().catch(() => 'posts');
+  if (show !== 'page') return { title, tagline, permalinkStructure, frontPage: { show: 'posts' } };
+  const pageId = Number(await page.inputValue('#page_on_front'));
+  const postsPageId = Number(await page.inputValue('#page_for_posts').catch(() => '0')) || undefined;
+  return { title, tagline, permalinkStructure, frontPage: { show: 'page', pageId, postsPageId } };
 }
 
 async function detectPlugins(page: Page): Promise<Manifest['plugins']> {
@@ -289,7 +347,8 @@ function acfToTina(f: AcfField, postTypeNames: string[], skipped: string[]): Tin
         fields: [
           { type: 'string', name: 'title', label: 'Link text' },
           { type: 'string', name: 'url', label: 'URL' },
-          { type: 'string', name: 'target', label: 'Target', options: ['', '_blank'] },
+          // WordPress stores '' for "same tab"; the transformer maps it to `_self`.
+          { type: 'string', name: 'target', label: 'Open in', options: [{ value: '_self', label: 'Same tab' }, { value: '_blank', label: 'New tab' }] },
         ],
       };
       break;
@@ -449,7 +508,7 @@ const CORE_METABOXES = new Set([
 ]);
 
 // Field names the templates and the generators give a meaning to. An ACF group can't use them.
-const RESERVED_FIELD_NAMES = ['title', 'date', 'excerpt', 'featured_image', 'seo', 'body'];
+const RESERVED_FIELD_NAMES = ['title', 'date', 'permalink_date', 'excerpt', 'featured_image', 'seo', 'body'];
 const renamedGroups = new Set<string>();
 const fieldNameCollisions: string[] = [];
 
@@ -537,6 +596,37 @@ function buildPostTypeSchema(
 // Export + main
 // ---------------------------------------------------------------------------
 
+/** Every term's slug and public link, from the taxonomy's admin screen. */
+async function readTermLinks(page: Page, tax: Taxonomy): Promise<{ slug: string; link: string }[]> {
+  const terms: { slug: string; link: string }[] = [];
+  for (let n = 1; ; n++) {
+    await page.goto(`${WP_ADMIN_URL}/edit-tags.php?taxonomy=${tax.name}&post_type=${tax.postTypes[0]}&paged=${n}`);
+    terms.push(
+      ...(await page.$$eval('#the-list tr[id^="tag-"]', (rows) =>
+        rows.map((r) => ({ slug: r.querySelector('td.slug')?.textContent?.trim() ?? '', link: r.querySelector('.row-actions .view a')?.getAttribute('href') ?? '' }))
+      ))
+    );
+    const pages = await page.$eval('.tablenav-pages .total-pages', (el) => Number(el.textContent?.replace(/\D/g, ''))).catch(() => 1);
+    if (n >= pages) return terms.filter((t) => t.slug && t.link);
+  }
+}
+
+/** A term's link is `<base>/<slug>/`, or `<base>/<ancestors>/<slug>/` when the taxonomy nests its URLs. */
+function taxonomyUrls(terms: { slug: string; link: string }[]): Pick<Taxonomy, 'rewrite' | 'termUrls'> {
+  const termUrls: Record<string, string> = {};
+  const prefixes: string[] = [];
+  for (const { slug, link } of terms) {
+    const url = new URL(link);
+    if (url.search) continue; // plain permalinks: the transform stops on these
+    const pathname = decodeURI(url.pathname).replace(/\/?$/, '/');
+    termUrls[slug] = pathname;
+    if (pathname.endsWith(`/${slug}/`)) prefixes.push(pathname.slice(0, -slug.length - 1));
+  }
+  if (!prefixes.length) return {};
+  const base = prefixes.reduce((a, b) => (b.length < a.length ? b : a));
+  return { rewrite: { base: base.replace(/^\/|\/$/g, ''), hierarchical: prefixes.some((p) => p !== base) }, termUrls };
+}
+
 async function exportContent(page: Page): Promise<void> {
   await page.goto(`${WP_ADMIN_URL}/export.php`);
   // The default radio is "All content" — just submit the form.
@@ -553,6 +643,17 @@ async function main(): Promise<void> {
   await login(page);
   const wpVersion = await detectWpVersion(page);
   console.log(`[tour]   WordPress ${wpVersion ?? '(version hidden)'}`);
+
+  await checkAccess(page);
+  if (CHECK_ONLY) {
+    await browser.close();
+    console.log('[tour] check passed: login works and the account is an administrator. Nothing was written.');
+    return;
+  }
+
+  console.log('[tour] reading site settings…');
+  const site = await readSiteSettings(page);
+  console.log(`[tour]   "${site.title}", permalinks ${site.permalinkStructure || '(plain)'}, front page: ${site.frontPage.show}`);
 
   console.log('[tour] detecting plugins…');
   const plugins = await detectPlugins(page);
@@ -581,10 +682,13 @@ async function main(): Promise<void> {
     }
   }
 
+  for (const tax of taxonomies.values()) Object.assign(tax, taxonomyUrls(await readTermLinks(page, tax)));
+
   const manifest: Manifest = {
     generatedAt: new Date().toISOString(),
     siteUrl: SITE_URL,
     wpVersion,
+    site,
     postTypes: schemas,
     taxonomies: [...taxonomies.values()],
     plugins,

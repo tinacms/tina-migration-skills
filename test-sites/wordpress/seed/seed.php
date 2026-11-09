@@ -45,7 +45,7 @@ $post1 = wp_insert_post( array(
 	'post_status'   => 'publish',
 	'post_title'    => 'Hello from the test site',
 	'post_excerpt'  => 'A short excerpt for the first post.',
-	'post_content'  => "<!-- wp:paragraph -->\n<p>This post exists so the migration has <strong>something</strong> to move.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:heading -->\n<h2 class=\"wp-block-heading\">A heading</h2>\n<!-- /wp:heading -->\n\n<!-- wp:list -->\n<ul class=\"wp-block-list\"><li>One</li><li>Two</li></ul>\n<!-- /wp:list -->",
+	'post_content'  => "<!-- wp:paragraph -->\n<p>This post exists so the migration has <strong>something</strong> to move. Curly {braces} and a <code>&lt;tag&gt;</code> must survive MDX.</p>\n<!-- /wp:paragraph -->\n\n<!-- wp:image {\"id\":$image_id} -->\n<figure class=\"wp-block-image\"><img src=\"" . wp_get_attachment_url( $image_id ) . "\" alt=\"Placeholder\" class=\"wp-image-$image_id\"/></figure>\n<!-- /wp:image -->\n\n<!-- wp:heading -->\n<h2 class=\"wp-block-heading\">A heading</h2>\n<!-- /wp:heading -->\n\n<!-- wp:list -->\n<ul class=\"wp-block-list\"><li>One</li><li>Two</li></ul>\n<!-- /wp:list -->",
 	'post_category' => array( $news ),
 	'tags_input'    => array( 'tinacms', 'astro' ),
 ) );
@@ -132,6 +132,39 @@ foreach ( array(
 	update_field( 'field_tina_event_agenda', '<ul><li>Welcome</li><li>Talks</li><li>Drinks</li></ul>', $id );
 	tina_yoast( $id, "$title | Events", "Details for $title." );
 }
+
+// Static front page + posts page (Settings → Reading), like most business sites.
+$home = wp_insert_post( array(
+	'post_type'    => 'page',
+	'post_status'  => 'publish',
+	'post_title'   => 'Home',
+	'post_content' => "<!-- wp:paragraph -->\n<p>Welcome to the test site.</p>\n<!-- /wp:paragraph -->",
+) );
+update_field( 'field_tina_hero_heading', 'Build better software', $home );
+update_field( 'field_tina_hero_cta', array( 'title' => 'See events', 'url' => home_url( '/event/' ), 'target' => '' ), $home );
+$news = wp_insert_post( array( 'post_type' => 'page', 'post_status' => 'publish', 'post_title' => 'News' ) );
+update_option( 'show_on_front', 'page' );
+update_option( 'page_on_front', $home );
+update_option( 'page_for_posts', $news );
+
+// Main menu.
+$menu = wp_create_nav_menu( 'Main' );
+foreach ( array( $home, $about, $news ) as $i => $page_id ) {
+	wp_update_nav_menu_item( $menu, 0, array(
+		'menu-item-object-id' => $page_id,
+		'menu-item-object'    => 'page',
+		'menu-item-type'      => 'post_type',
+		'menu-item-status'    => 'publish',
+		'menu-item-position'  => $i + 1,
+	) );
+}
+wp_update_nav_menu_item( $menu, 0, array(
+	'menu-item-title'    => 'Events',
+	'menu-item-url'      => home_url( '/event/' ),
+	'menu-item-type'     => 'custom',
+	'menu-item-status'   => 'publish',
+	'menu-item-position' => 4,
+) );
 
 update_option( 'tina_test_seeded', 1 );
 WP_CLI::success( 'Seeded test content.' );
