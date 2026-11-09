@@ -62,12 +62,13 @@ async function loadCollection(name: string): Promise<{ path: string; relativePat
 }
 
 function urlFor(rule: RouteRule, path: string, values: Record<string, any>): string {
-  const d = values.date ? new Date(values.date) : new Date(0);
+  // Migrated posts carry the local date from their WordPress URL. New ones use the publish date.
+  const [year, month, day] = values.permalink_date?.split('/') ?? new Date(values.date ?? 0).toISOString().slice(0, 10).split('-');
   return rule.pattern
     .replace(':path', path)
-    .replace(':year', String(d.getUTCFullYear()))
-    .replace(':month', String(d.getUTCMonth() + 1).padStart(2, '0'))
-    .replace(':day', String(d.getUTCDate()).padStart(2, '0'));
+    .replace(':year', year)
+    .replace(':month', month)
+    .replace(':day', day);
 }
 
 const byDateDesc = (a: Doc, b: Doc) => new Date(b.values.date ?? 0).valueOf() - new Date(a.values.date ?? 0).valueOf();

@@ -85,7 +85,16 @@ type PostTypeSchema = {
   unmapped: { id: string; title: string }[];
 };
 
-type Taxonomy = { name: string; label: string; hierarchical: boolean; postTypes: string[] };
+type Taxonomy = {
+  name: string;
+  label: string;
+  hierarchical: boolean;
+  postTypes: string[];
+  /** How WordPress builds this taxonomy's URLs, read from its term links. Missing = no links seen; WordPress's defaults apply. */
+  rewrite?: { base: string; hierarchical: boolean };
+  /** Term slug → URL path on the WordPress site. */
+  termUrls?: Record<string, string>;
+};
 
 type SiteSettings = {
   title: string;
@@ -498,6 +507,29 @@ const CORE_METABOXES = new Set([
   'commentsdiv', 'postcustom', 'trackbacksdiv', 'revisionsdiv', 'pageparentdiv', 'formatdiv',
 ]);
 
+// Field names the templates and the generators give a meaning to. An ACF group can't use them.
+const RESERVED_FIELD_NAMES = ['title', 'date', 'permalink_date', 'excerpt', 'featured_image', 'seo', 'body'];
+const renamedGroups = new Set<string>();
+const fieldNameCollisions: string[] = [];
+
+/**
+ * Field name for an ACF group. Titles can differ only in punctuation ("Event Details",
+ * "Event-Details"), so any name that clashes takes a suffix from the group's key.
+ * Every group in a clash is renamed, so the names don't depend on the order ACF lists them.
+ */
+function allocateGroupName(group: AcfFieldGroup, acfGroups: AcfFieldGroup[], taken: Set<string>, postType: string): string | undefined {
+  const base = toTinaName(group.title);
+  const clashes = !base || taken.has(base) || acfGroups.some((g) => g.key !== group.key && toTinaName(g.title) === base);
+  if (!clashes) return base;
+  const name = [base || 'acf', toTinaName(group.key.replace(/^group_/, ''))].filter(Boolean).join('_');
+  if (taken.has(name)) {
+    fieldNameCollisions.push(`${postType}: ACF group "${group.title}" (${group.key}) needs the field name "${name}", which is already used`);
+    return undefined;
+  }
+  renamedGroups.add(`"${group.title}" (${group.key}) → ${name}`);
+  return name;
+}
+
 function buildPostTypeSchema(
   pt: { name: string; label: string },
   screen: ScreenInfo,
@@ -527,6 +559,7 @@ function buildPostTypeSchema(
 
   // ACF: one Tina object per field group, mirroring the metabox the editor sees.
   const onScreen = new Set(screen.metaboxes.map((m) => m.id));
+  const taken = new Set([...RESERVED_FIELD_NAMES, ...fields.map((f) => f.name)]);
   for (const group of ctx.acfGroups) {
     if (!onScreen.has(`acf-${group.key}`) && !acfGroupPostTypes(group).has(pt.name)) continue;
     handled.add(`acf-${group.key}`);
@@ -534,7 +567,10 @@ function buildPostTypeSchema(
       .map((f) => acfToTina(f, ctx.postTypeNames, ctx.skipped))
       .filter((x): x is TinaField => !!x);
     if (groupFields.length === 0) continue;
-    fields.push({ type: 'object', name: toTinaName(group.title), label: group.title, fields: groupFields, source: { kind: 'acf-group', key: group.key } });
+    const name = allocateGroupName(group, ctx.acfGroups, taken, pt.name);
+    if (!name) continue;
+    taken.add(name);
+    fields.push({ type: 'object', name, label: group.title, fields: groupFields, source: { kind: 'acf-group', key: group.key } });
   }
 
   // SEO plugin metabox → single `seo` object.
@@ -559,6 +595,37 @@ function buildPostTypeSchema(
 // ---------------------------------------------------------------------------
 // Export + main
 // ---------------------------------------------------------------------------
+
+/** Every term's slug and public link, from the taxonomy's admin screen. */
+async function readTermLinks(page: Page, tax: Taxonomy): Promise<{ slug: string; link: string }[]> {
+  const terms: { slug: string; link: string }[] = [];
+  for (let n = 1; ; n++) {
+    await page.goto(`${WP_ADMIN_URL}/edit-tags.php?taxonomy=${tax.name}&post_type=${tax.postTypes[0]}&paged=${n}`);
+    terms.push(
+      ...(await page.$$eval('#the-list tr[id^="tag-"]', (rows) =>
+        rows.map((r) => ({ slug: r.querySelector('td.slug')?.textContent?.trim() ?? '', link: r.querySelector('.row-actions .view a')?.getAttribute('href') ?? '' }))
+      ))
+    );
+    const pages = await page.$eval('.tablenav-pages .total-pages', (el) => Number(el.textContent?.replace(/\D/g, ''))).catch(() => 1);
+    if (n >= pages) return terms.filter((t) => t.slug && t.link);
+  }
+}
+
+/** A term's link is `<base>/<slug>/`, or `<base>/<ancestors>/<slug>/` when the taxonomy nests its URLs. */
+function taxonomyUrls(terms: { slug: string; link: string }[]): Pick<Taxonomy, 'rewrite' | 'termUrls'> {
+  const termUrls: Record<string, string> = {};
+  const prefixes: string[] = [];
+  for (const { slug, link } of terms) {
+    const url = new URL(link);
+    if (url.search) continue; // plain permalinks: the transform stops on these
+    const pathname = decodeURI(url.pathname).replace(/\/?$/, '/');
+    termUrls[slug] = pathname;
+    if (pathname.endsWith(`/${slug}/`)) prefixes.push(pathname.slice(0, -slug.length - 1));
+  }
+  if (!prefixes.length) return {};
+  const base = prefixes.reduce((a, b) => (b.length < a.length ? b : a));
+  return { rewrite: { base: base.replace(/^\/|\/$/g, ''), hierarchical: prefixes.some((p) => p !== base) }, termUrls };
+}
 
 async function exportContent(page: Page): Promise<void> {
   await page.goto(`${WP_ADMIN_URL}/export.php`);
@@ -615,6 +682,8 @@ async function main(): Promise<void> {
     }
   }
 
+  for (const tax of taxonomies.values()) Object.assign(tax, taxonomyUrls(await readTermLinks(page, tax)));
+
   const manifest: Manifest = {
     generatedAt: new Date().toISOString(),
     siteUrl: SITE_URL,
@@ -624,6 +693,10 @@ async function main(): Promise<void> {
     taxonomies: [...taxonomies.values()],
     plugins,
   };
+  // No schema.json means nothing downstream can run on names that would overwrite each other.
+  if (fieldNameCollisions.length) {
+    throw new Error(`Field name collisions, schema.json not written. Rename or re-key these ACF groups, then run the tour again:\n  ${[...new Set(fieldNameCollisions)].join('\n  ')}`);
+  }
   const outPath = path.join(MIGRATION_DIR, 'schema.json');
   await writeFile(outPath, JSON.stringify(manifest, null, 2) + '\n');
   console.log(`[tour] schema written to ${outPath}`);
@@ -632,6 +705,7 @@ async function main(): Promise<void> {
     for (const m of s.unmapped) console.warn(`[tour]   UNMAPPED on ${s.name}: metabox "${m.title}" (#${m.id})`);
   }
   for (const s of new Set(skipped)) console.warn(`[tour]   SKIPPED field: ${s}`);
+  for (const r of renamedGroups) console.warn(`[tour]   RENAMED ACF group, its name clashed: ${r}`);
 
   console.log('[tour] exporting content…');
   try {

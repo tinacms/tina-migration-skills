@@ -29,7 +29,7 @@ type Field = {
   [k: string]: unknown;
 };
 type PostType = { name: string; label: string; editor: string; fields: Field[] };
-type Taxonomy = { name: string; label: string; hierarchical: boolean; postTypes: string[] };
+type Taxonomy = { name: string; label: string; hierarchical: boolean; postTypes: string[]; rewrite?: { base: string; hierarchical: boolean } };
 type Manifest = {
   site: { title: string; tagline: string; permalinkStructure: string };
   postTypes: PostType[];
@@ -57,7 +57,7 @@ const warnings: string[] = [];
 /** Turn a WordPress permalink structure into a route pattern for posts. */
 function postPattern(structure: string): string {
   if (!structure) {
-    warnings.push('Plain permalinks (?p=123) — posts get /:path/ URLs. Add redirects from the old ?p= URLs.');
+    warnings.push('Plain permalinks (?p=123) — posts get /:path/ URLs. Astro can\'t redirect query-string URLs, so transform-content.ts stops unless you pass --accept-lost-query-urls.');
     return '/:path/';
   }
   const supported = { '%postname%': ':path', '%year%': ':year', '%monthnum%': ':month', '%day%': ':day' } as Record<string, string>;
@@ -155,6 +155,10 @@ async function main(): Promise<void> {
     const pattern = kind === 'post' ? postPattern(manifest.site.permalinkStructure) : kind === 'page' ? '/:path/' : `/${pt.name}/:path/`;
     routes[name] = { kind, label: pt.label, pattern, ...(kind === 'cpt' ? { archive: `/${pt.name}/` } : {}) };
     const fields = pt.fields.map((f) => toTinaField(f, collectionNames));
+    // The publish date is stored in GMT, so it can't rebuild a URL that used the site's local date.
+    if (/:(year|month|day)/.test(pattern)) {
+      fields.splice(fields.findIndex((f) => f.name === 'date') + 1, 0, { type: 'string', name: 'permalink_date', label: 'Permalink date', description: 'Part of this entry\'s URL, as YYYY/MM/DD. Changing it changes the URL.' });
+    }
     const routerPath = pattern.includes(':year') ? undefined : pattern;
     await writeFile(path.join(OUT_DIR, `${name}.ts`), collectionFile({ name, label: pt.label, format: 'mdx', routerPath, fields, note: `WordPress post type "${pt.name}" (${pt.editor} editor)` }));
     exports.push(name);
@@ -167,15 +171,16 @@ async function main(): Promise<void> {
       { type: 'string', name: 'description', label: 'Description', ui: { component: 'textarea' } },
       ...(tax.hierarchical ? [{ type: 'reference', name: 'parent', label: 'Parent', collections: [name] }] : []),
     ];
-    // WordPress default term URLs: /category/<slug>/, /tag/<slug>/, /<taxonomy>/<slug>/
-    const base = tax.name === 'post_tag' ? 'tag' : tax.name;
+    // The tour reads the real rule from the term links. Otherwise WordPress's defaults: /category/<slug>/, /tag/<slug>/, /<taxonomy>/<slug>/
+    const base = tax.rewrite?.base ?? (tax.name === 'post_tag' ? 'tag' : tax.name);
+    const pattern = base ? `/${base}/:path/` : '/:path/';
     const usedBy: Record<string, string> = {};
     for (const pt of manifest.postTypes) {
       const field = pt.fields.find((f) => f.source?.kind === 'taxonomy' && f.source.taxonomy === tax.name);
       if (field) usedBy[toTinaName(pt.name)] = field.name;
     }
-    routes[name] = { kind: 'taxonomy', label: tax.label, pattern: `/${base}/:path/`, usedBy };
-    await writeFile(path.join(OUT_DIR, `${name}.ts`), collectionFile({ name, label: tax.label, format: 'json', routerPath: `/${base}/:path/`, fields, note: `WordPress taxonomy "${tax.name}"` }));
+    routes[name] = { kind: 'taxonomy', label: tax.label, pattern, usedBy };
+    await writeFile(path.join(OUT_DIR, `${name}.ts`), collectionFile({ name, label: tax.label, format: 'json', routerPath: pattern, fields, note: `WordPress taxonomy "${tax.name}"` }));
     exports.push(name);
   }
 
