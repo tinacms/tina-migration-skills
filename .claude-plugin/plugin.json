@@ -1,7 +1,7 @@
 {
   "name": "tina-migration",
   "displayName": "TinaCMS Migration",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Migrate an existing website to TinaCMS. WordPress → TinaCMS on Astro, with an editor that mirrors /wp-admin.",
   "author": {
     "name": "TinaCMS",
