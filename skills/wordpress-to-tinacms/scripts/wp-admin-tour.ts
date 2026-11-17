@@ -73,6 +73,7 @@ type TinaField = {
   collections?: string[];
   fields?: TinaField[];
   ui?: Record<string, unknown>;
+  templates?: { name: string; label: string; fields: TinaField[] }[];
   source?: FieldSource;
 };
 
@@ -219,7 +220,10 @@ function referenceField(name: string, label: string, collections: string[], list
   };
 }
 
-function acfToTina(f: AcfField, postTypeNames: string[], skipped: string[]): TinaField | null {
+// ACF stores a sub-field's value under its parent's key: a group's sub-fields under
+// `{group}_{sub}`, and repeater and flexible-content rows under `{field}_{i}_{sub}`,
+// where `{i}` is the row index. `metaPrefix` carries that key down the recursion.
+function acfToTina(f: AcfField, postTypeNames: string[], skipped: string[], metaPrefix = ''): TinaField | null {
   const name = toTinaName(f.name);
   const base = {
     name,
@@ -227,7 +231,8 @@ function acfToTina(f: AcfField, postTypeNames: string[], skipped: string[]): Tin
     ...(f.instructions ? { description: f.instructions } : {}),
     ...(f.required ? { required: true } : {}),
   };
-  const source: FieldSource = { kind: 'acf', key: f.key, metaKey: f.name, acfType: f.type };
+  const metaKey = `${metaPrefix}${f.name}`;
+  const source: FieldSource = { kind: 'acf', key: f.key, metaKey, acfType: f.type };
   const options = (): TinaOption[] =>
     Object.entries(f.choices ?? {}).map(([value, label]) => (value === label ? value : { value, label }));
   const targets = (): string[] => {
@@ -235,8 +240,8 @@ function acfToTina(f: AcfField, postTypeNames: string[], skipped: string[]): Tin
     const list = Array.isArray(pt) ? pt : pt ? [pt] : [];
     return list.length ? list : postTypeNames;
   };
-  const children = (subs: AcfField[] = []) =>
-    subs.map((s) => acfToTina(s, postTypeNames, skipped)).filter((x): x is TinaField => !!x);
+  const children = (subs: AcfField[] = [], prefix = `${metaKey}_`) =>
+    subs.map((s) => acfToTina(s, postTypeNames, skipped, prefix)).filter((x): x is TinaField => !!x);
 
   let field: TinaField | null;
   switch (f.type) {
@@ -320,7 +325,7 @@ function acfToTina(f: AcfField, postTypeNames: string[], skipped: string[]): Tin
       field = { ...base, type: 'object', fields: children(f.sub_fields) };
       break;
     case 'repeater':
-      field = { ...base, type: 'object', list: true, fields: children(f.sub_fields) };
+      field = { ...base, type: 'object', list: true, fields: children(f.sub_fields, `${metaKey}_{i}_`) };
       break;
     case 'flexible_content': {
       const layouts = Array.isArray(f.layouts) ? f.layouts : Object.values(f.layouts ?? {});
@@ -328,10 +333,12 @@ function acfToTina(f: AcfField, postTypeNames: string[], skipped: string[]): Tin
         ...base,
         type: 'object',
         list: true,
-        // Tina uses `templates` for flexible lists; kept under `ui` here so the type stays simple.
-        ui: {
-          templates: layouts.map((l) => ({ name: toTinaName(l.name), label: l.label, fields: children(l.sub_fields) })),
-        },
+        // One Tina template per layout, at the top level where Tina reads it.
+        templates: layouts.map((l) => ({
+          name: toTinaName(l.name),
+          label: l.label,
+          fields: children(l.sub_fields, `${metaKey}_{i}_`),
+        })),
       };
       break;
     }

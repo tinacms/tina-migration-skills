@@ -119,7 +119,7 @@ Convert each `<item>` in `wp-export.xml` into a Markdown file under the matching
 - `<wp:post_name>` → filename slug (`.mdx`)
 - `<wp:status>publish</wp:status>` only — skip drafts unless the user asks
 - `<content:encoded>` → body (strip Gutenberg block comments, convert HTML to Markdown)
-- `<wp:postmeta>` → frontmatter fields: match each `<wp:meta_key>` to a field's `source.metaKey` in `schema.json`. ACF values go inside their field group's object (e.g. `venue` → `event_details.venue`)
+- `<wp:postmeta>` → frontmatter fields: match each `<wp:meta_key>` to a field's `source.metaKey` in `schema.json`. ACF values go inside their field group's object (e.g. `venue` → `event_details.venue`). Sub-fields of groups, repeaters and flexible content carry their full stored key (e.g. `location_address`); repeater and flexible-content rows use `{i}` for the row index
 - `<wp:attachment>` entries → download referenced images to `public/uploads/`, rewrite `<img src>` paths
 
 ## 9. Verify locally

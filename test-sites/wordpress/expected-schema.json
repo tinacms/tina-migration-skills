@@ -496,7 +496,7 @@
                   "source": {
                     "kind": "acf",
                     "key": "field_tina_event_address",
-                    "metaKey": "address",
+                    "metaKey": "location_address",
                     "acfType": "text"
                   }
                 },
@@ -507,7 +507,7 @@
                   "source": {
                     "kind": "acf",
                     "key": "field_tina_event_city",
-                    "metaKey": "city",
+                    "metaKey": "location_city",
                     "acfType": "text"
                   }
                 }
