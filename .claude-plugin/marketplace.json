@@ -1,0 +1,17 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "tinacms",
+  "description": "TinaCMS plugins for Claude Code",
+  "owner": {
+    "name": "TinaCMS",
+    "url": "https://tina.io"
+  },
+  "plugins": [
+    {
+      "name": "tina-migration",
+      "source": "./",
+      "description": "Migrate an existing website to TinaCMS. WordPress → TinaCMS on Astro, with an editor that mirrors /wp-admin.",
+      "category": "migration"
+    }
+  ]
+}
