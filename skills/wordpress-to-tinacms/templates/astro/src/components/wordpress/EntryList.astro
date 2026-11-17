@@ -1,0 +1,32 @@
+---
+/** Generic listing: posts page, CPT archives, taxonomy term pages, latest-posts homepage. */
+import FormattedDate from '../FormattedDate.astro';
+import type { Listing } from '../../lib/wordpress-content';
+
+interface Props {
+	listing: Listing;
+}
+
+const { listing } = Astro.props;
+---
+
+<main class="mx-auto max-w-5xl px-6 pb-16 pt-28">
+	<h1 class="mb-8 text-4xl font-semibold tracking-tight">{listing.title}</h1>
+	{listing.docs.length === 0 && <p class="text-muted-foreground">Nothing here yet.</p>}
+	<ul class="grid list-none gap-6 p-0 sm:grid-cols-2">
+		{listing.docs.map((doc) => (
+			<li>
+				<a href={doc.url} class="group block overflow-hidden rounded-xl border bg-card shadow-sm transition-shadow hover:shadow-md">
+					{doc.values.featured_image && <img src={doc.values.featured_image} alt="" class="aspect-video w-full object-cover" />}
+					<div class="p-6">
+						<h2 class="font-semibold group-hover:underline">{doc.title}</h2>
+						{doc.values.date && (
+							<p class="mt-1 text-sm text-muted-foreground"><FormattedDate date={new Date(doc.values.date)} /></p>
+						)}
+						{doc.values.excerpt && <p class="mt-2 text-sm text-muted-foreground">{doc.values.excerpt}</p>}
+					</div>
+				</a>
+			</li>
+		))}
+	</ul>
+</main>
