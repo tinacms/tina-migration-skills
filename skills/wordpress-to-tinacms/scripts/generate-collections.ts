@@ -69,7 +69,7 @@ function postPattern(structure: string): string {
   return structure.replace(/%[a-z_]+%/g, (t) => supported[t]).replace(/\/?$/, '/');
 }
 
-/** Strip `source`, move flexible-content templates out of `ui`, and drop references to collections that don't exist. */
+/** Strip `source`, convert flexible-content templates (top-level, or under `ui` from older tours), and drop references to collections that don't exist. */
 function toTinaField(field: Field, collections: Set<string>): Field {
   const { source: _source, ...rest } = field;
   const out: Field = { ...rest };
@@ -85,9 +85,13 @@ function toTinaField(field: Field, collections: Set<string>): Field {
   if (out.fields) out.fields = out.fields.map((f) => toTinaField(f, collections));
   if (out.ui?.templates) {
     const { templates, ...ui } = out.ui;
-    out.templates = templates.map((t) => ({ ...t, fields: t.fields.map((f) => toTinaField(f, collections)) }));
+    out.templates = templates;
     out.ui = Object.keys(ui).length ? ui : undefined;
     if (!out.ui) delete out.ui;
+  }
+  const templates = out.templates as { name: string; label: string; fields: Field[] }[] | undefined;
+  if (templates) {
+    out.templates = templates.map((t) => ({ ...t, fields: t.fields.map((f) => toTinaField(f, collections)) }));
   }
   if (out.type === 'rich-text' && out.name === 'body') out.isBody = true;
   // Name list items in the editor instead of Tina's default "<Label> Item".
