@@ -34,7 +34,8 @@ type FieldSource =
   | { kind: 'acf'; key: string; metaKey: string; acfType: string }
   | { kind: 'acf-group'; key: string }
   | { kind: 'seo'; plugin: 'yoast' | 'rank-math'; metaKey?: string };
-type Field = { type: string; name: string; label: string; list?: boolean; fields?: Field[]; ui?: { templates?: { name: string; fields: Field[] }[] }; source?: FieldSource };
+type Template = { name: string; fields: Field[] };
+type Field = { type: string; name: string; label: string; list?: boolean; fields?: Field[]; templates?: Template[]; ui?: { templates?: Template[] }; source?: FieldSource };
 type Manifest = {
   siteUrl: string;
   site: { title: string; tagline: string; frontPage: { show: 'posts' } | { show: 'page'; pageId: number; postsPageId?: number } };
@@ -246,32 +247,36 @@ function transform(manifest: Manifest, data: ReturnType<typeof parseExport>, rou
     return items.length ? items : undefined;
   };
 
-  function acfValue(field: Field, src: Extract<FieldSource, { kind: 'acf' }>, meta: Map<string, string>, prefix: string): unknown {
-    const key = prefix + src.metaKey;
+  // `src.metaKey` is the full key ACF stores the value under. Sub-fields of repeater and
+  // flexible-content rows have a `{i}` per enclosing row (e.g. `team_{i}_name`); `rows`
+  // holds those row indexes, outermost first.
+  function acfValue(field: Field, src: Extract<FieldSource, { kind: 'acf' }>, meta: Map<string, string>, rows: number[] = []): unknown {
+    let depth = 0;
+    const key = src.metaKey.replace(/\{i\}/g, () => String(rows[depth++] ?? 0));
     const raw = meta.get(key);
-    const sub = (f: Field, p: string) => (f.source?.kind === 'acf' ? acfValue(f, f.source, meta, p) : undefined);
-    const objectOf = (fields: Field[] = [], p: string) => {
+    const objectOf = (fields: Field[] = [], r: number[]) => {
       const out: Record<string, unknown> = {};
       for (const f of fields) {
-        const v = sub(f, p);
+        const v = f.source?.kind === 'acf' ? acfValue(f, f.source, meta, r) : undefined;
         if (v !== undefined) out[f.name] = v;
       }
       return Object.keys(out).length ? out : undefined;
     };
     switch (src.acfType) {
       case 'group':
-        return objectOf(field.fields, `${key}_`);
+        return objectOf(field.fields, rows);
       case 'repeater': {
-        const rows = Array.from({ length: Number(raw) || 0 }, (_, n) => objectOf(field.fields, `${key}_${n}_`)).filter(Boolean);
-        return rows.length ? rows : undefined;
+        const items = Array.from({ length: Number(raw) || 0 }, (_, n) => objectOf(field.fields, [...rows, n])).filter(Boolean);
+        return items.length ? items : undefined;
       }
       case 'flexible_content': {
         const layouts = asArray(maybeUnserialize(raw ?? '') as string[]);
-        const rows = layouts.map((layout, n) => {
-          const tpl = field.ui?.templates?.find((t) => t.name === toTinaName(layout));
-          return tpl ? { _template: tpl.name, ...objectOf(tpl.fields, `${key}_${n}_`) } : undefined;
+        const templates = field.templates ?? field.ui?.templates;
+        const items = layouts.map((layout, n) => {
+          const tpl = templates?.find((t) => t.name === toTinaName(layout));
+          return tpl ? { _template: tpl.name, ...objectOf(tpl.fields, [...rows, n]) } : undefined;
         }).filter(Boolean);
-        return rows.length ? rows : undefined;
+        return items.length ? items : undefined;
       }
     }
     if (src.acfType === 'true_false') return raw === undefined ? undefined : raw === '1'; // ACF saves an unticked box as ''
@@ -372,7 +377,7 @@ function transform(manifest: Manifest, data: ReturnType<typeof parseExport>, rou
       } else if (src?.kind === 'acf-group') {
         const group: Record<string, unknown> = {};
         for (const f of field.fields ?? []) {
-          const v = f.source?.kind === 'acf' ? acfValue(f, f.source, item.meta, '') : undefined;
+          const v = f.source?.kind === 'acf' ? acfValue(f, f.source, item.meta) : undefined;
           if (v !== undefined) group[f.name] = v;
         }
         value = Object.keys(group).length ? group : undefined;
