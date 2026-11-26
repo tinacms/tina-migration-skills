@@ -1,0 +1,58 @@
+---
+/** Renders one field's value using its Tina definition — recurses into objects and lists. */
+import type { TinaField } from 'tinacms';
+import TinaMarkdown from '@tinacms/astro/TinaMarkdown.astro';
+import FormattedDate from '../FormattedDate.astro';
+import { mdxComponents } from '../mdx/components';
+import type { Doc } from '../../lib/wordpress-content';
+
+interface Props {
+	field: TinaField;
+	value: any;
+	byFile: Map<string, Doc>;
+	/** Render without the <dt> label (list items). */
+	bare?: boolean;
+}
+
+const { field, value, byFile, bare = false } = Astro.props;
+const f = field as TinaField & { list?: boolean; fields?: TinaField[]; options?: (string | { value: string; label: string })[] };
+const Self = Astro.self;
+const optionLabel = (v: string) => {
+	const o = f.options?.find((opt) => (typeof opt === 'string' ? opt : opt.value) === v);
+	return typeof o === 'object' ? o.label : v;
+};
+// A list of references is an object list wrapping one `item` reference.
+const isRefList = f.type === 'object' && f.list && f.fields?.length === 1 && f.fields[0].type === 'reference';
+const values = f.list ? (Array.isArray(value) ? value : []) : [value];
+const isUrl = (s: unknown) => typeof s === 'string' && /^(https?:\/\/|\/)/.test(s);
+---
+
+{!bare && <dt class="font-medium text-muted-foreground">{f.label ?? f.name}</dt>}
+<dd class="m-0">
+	{isRefList ? (
+		<ul class="m-0 flex list-none flex-wrap gap-2 p-0">
+			{values.map((v: { item?: string }) => {
+				const target = v?.item ? byFile.get(v.item) : undefined;
+				return <li>{target ? <a href={target.url} class="rounded-full border px-3 py-1 hover:bg-muted">{target.title}</a> : v?.item}</li>;
+			})}
+		</ul>
+	) : f.type === 'object' ? (
+		<div class="grid gap-4">
+			{values.map((v: any) => (
+				<dl class="grid gap-3 border-l-2 pl-4">
+					{(f.fields ?? []).filter((sub) => v?.[sub.name] !== undefined && v?.[sub.name] !== null).map((sub) => <Self field={sub} value={v[sub.name]} byFile={byFile} />)}
+				</dl>
+			))}
+		</div>
+	) : (
+		values.map((v: any) =>
+			f.type === 'reference' ? (byFile.get(v) ? <a href={byFile.get(v)!.url} class="underline">{byFile.get(v)!.title}</a> : v) :
+			f.type === 'image' ? <img src={v} alt="" class="max-h-64 rounded-lg border" /> :
+			f.type === 'rich-text' ? <div class="prose max-w-none dark:prose-invert"><TinaMarkdown content={v} components={mdxComponents} /></div> :
+			f.type === 'datetime' ? <FormattedDate date={new Date(v)} /> :
+			f.type === 'boolean' ? (v ? 'Yes' : 'No') :
+			isUrl(v) && !f.options ? <a href={v} class="underline">{v}</a> :
+			<span class="mr-2">{f.options ? optionLabel(v) : String(v)}</span>
+		)
+	)}
+</dd>

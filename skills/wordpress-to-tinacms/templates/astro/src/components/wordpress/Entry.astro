@@ -1,0 +1,48 @@
+---
+/**
+ * Generic single-entry template: title, date, featured image, every other
+ * field in schema order, then the body. A starting point — replace it with
+ * per-collection templates as the design takes shape.
+ */
+import type { TinaField } from 'tinacms';
+import TinaMarkdown from '@tinacms/astro/TinaMarkdown.astro';
+import FormattedDate from '../FormattedDate.astro';
+import FieldValue from './FieldValue.astro';
+import { mdxComponents } from '../mdx/components';
+import { fieldsOf, type Doc } from '../../lib/wordpress-content';
+
+interface Props {
+	doc: Doc;
+	byFile: Map<string, Doc>;
+}
+
+const { doc, byFile } = Astro.props;
+const v = doc.values;
+const SHOWN_ABOVE = new Set(['title', 'date', 'featured_image', 'excerpt', 'seo', 'body']);
+const fields = fieldsOf(doc.collection).filter((f) => !SHOWN_ABOVE.has(f.name) && v[f.name] !== undefined && v[f.name] !== null) as TinaField[];
+const isPost = doc.collection === 'post';
+---
+
+<main class="mx-auto max-w-3xl px-6 pb-16 pt-28">
+	<header class="mb-8">
+		{isPost && v.date && (
+			<p class="text-sm text-muted-foreground"><FormattedDate date={new Date(v.date)} /></p>
+		)}
+		<h1 class="mt-2 text-4xl font-semibold tracking-tight lg:text-5xl">{doc.title}</h1>
+		{v.excerpt && <p class="mt-4 text-lg text-muted-foreground">{v.excerpt}</p>}
+	</header>
+
+	{v.featured_image && <img src={v.featured_image} alt="" class="mb-10 w-full rounded-2xl border" />}
+
+	{fields.length > 0 && (
+		<dl class="mb-10 grid gap-4 rounded-xl border bg-card p-6 text-sm">
+			{fields.map((field) => <FieldValue field={field} value={v[field.name]} byFile={byFile} />)}
+		</dl>
+	)}
+
+	{v.body && (
+		<div class="prose prose-lg max-w-none dark:prose-invert">
+			<TinaMarkdown content={v.body} components={mdxComponents} />
+		</div>
+	)}
+</main>
