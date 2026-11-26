@@ -201,13 +201,32 @@ function transform(manifest: Manifest, data: ReturnType<typeof parseExport>, rou
   const migratable = (i: Item) => inScope(i) && !i.password;
 
   // Media: every attachment plus any other wp-content/uploads URL the content points at.
-  const media = new Map<string, string>(); // remote URL → local /uploads/... path
+  // The local path comes from the URL's pathname only (no query or #fragment), one decoded
+  // segment at a time. A segment that is empty, `.` or `..`, or that decodes to a slash, is
+  // rejected, so a crafted link can't make the download write outside public/uploads.
+  const media = new Map<string, { href: string; file: string }>(); // remote URL → site href + file under public/
   const localUpload = (url: string) => {
-    const m = url.match(/\/wp-content\/uploads\/(.+)$/);
+    let pathname: string;
+    try {
+      pathname = new URL(url).pathname;
+    } catch {
+      return undefined;
+    }
+    const m = pathname.match(/\/wp-content\/uploads\/(.+)$/);
     if (!m) return undefined;
-    const local = `/uploads/${m[1].split('?')[0]}`;
-    media.set(url, local);
-    return local;
+    let segments: string[];
+    try {
+      segments = m[1].split('/').map((seg) => decodeURIComponent(seg));
+    } catch {
+      segments = [];
+    }
+    if (!segments.length || segments.some((seg) => !seg || seg === '.' || seg === '..' || /[\\/\0]/.test(seg))) {
+      report.warnings.push(`Media URL skipped, its path isn't a plain file under wp-content/uploads: ${url}`);
+      return undefined;
+    }
+    const href = `/uploads/${segments.map(encodeURIComponent).join('/')}`;
+    media.set(url, { href, file: path.posix.join('public/uploads', ...segments) });
+    return href;
   };
   const attachmentPath = (id: unknown) => {
     const att = byId.get(Number(id));
@@ -482,8 +501,19 @@ function transform(manifest: Manifest, data: ReturnType<typeof parseExport>, rou
 
 const sha256 = (content: string | Buffer) => createHash('sha256').update(content).digest('hex');
 
+// Everything this script writes or deletes lives under one of these. `inProject` resolves a
+// path and refuses anything outside them, so neither a crafted media URL nor a tampered
+// transform-report.json can point a write or a delete somewhere else on the machine.
+const WRITABLE = ['public/uploads', 'src/content', 'src/lib/wordpress.json', 'migration/transform-report.json'].map((p) => path.resolve(ROOT, p));
+
+function inProject(rel: string): string | undefined {
+  const abs = path.resolve(ROOT, rel);
+  return WRITABLE.some((allowed) => abs === allowed || abs.startsWith(allowed + path.sep)) ? abs : undefined;
+}
+
 async function writeAt(rel: string, content: string | Buffer) {
-  const abs = path.join(ROOT, rel);
+  const abs = inProject(rel);
+  if (!abs) throw new Error(`Refusing to write outside the migration's output folders: ${rel}`);
   await mkdir(path.dirname(abs), { recursive: true });
   await writeFile(abs, content);
 }
@@ -514,11 +544,12 @@ async function main(): Promise<void> {
     report.generated[rel] = sha256(content);
   }
 
-  for (const [url, local] of result.media) {
-    const res = await fetch(url);
-    const rel = path.posix.join('public', local);
-    if (!res.ok) {
-      report.warnings.push(`Media download failed (${res.status}): ${url}`);
+  for (const [url, { file: rel }] of result.media) {
+    // A DNS or TLS error or a timeout counts as a failed download, like a non-2xx
+    // response, so one bad file doesn't stop the run before the cleanup and report.
+    const res = await fetch(url, { signal: AbortSignal.timeout(60_000) }).catch((err: Error) => err);
+    if (res instanceof Error || !res.ok) {
+      report.warnings.push(`Media download failed (${res instanceof Error ? res.message : res.status}): ${url}`);
       if (previous[rel]) report.generated[rel] = previous[rel]; // still wanted, so don't treat the old copy as a leftover
       continue;
     }
@@ -532,10 +563,15 @@ async function main(): Promise<void> {
   // A file that was never generated isn't listed, and one edited since the last run doesn't match its hash. Both stay.
   for (const [rel, hash] of Object.entries(previous)) {
     if (report.generated[rel]) continue;
-    const current = await readFile(path.join(ROOT, rel)).catch(() => undefined);
+    const abs = inProject(rel);
+    if (!abs) {
+      report.warnings.push(`${rel} is listed in the last report but is outside the migration's output folders, so it was left alone.`);
+      continue;
+    }
+    const current = await readFile(abs).catch(() => undefined);
     if (!current) continue;
     if (sha256(current) === hash) {
-      await rm(path.join(ROOT, rel));
+      await rm(abs);
       report.removed.push(rel);
     } else {
       report.warnings.push(`${rel} is no longer in WordPress but was edited after the last run, so it was kept. Delete it if it should go.`);
