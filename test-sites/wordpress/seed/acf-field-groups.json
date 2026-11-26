@@ -1,0 +1,78 @@
+[
+  {
+    "key": "group_tina_event_details",
+    "title": "Event Details",
+    "fields": [
+      { "key": "field_tina_event_tab_details", "label": "Details", "name": "", "type": "tab", "placement": "top" },
+      { "key": "field_tina_event_start", "label": "Starts", "name": "event_start", "type": "date_time_picker", "required": 1, "display_format": "d/m/Y g:i a", "return_format": "Y-m-d H:i:s", "first_day": 1 },
+      { "key": "field_tina_event_format", "label": "Format", "name": "format", "type": "select", "choices": { "in-person": "In person", "online": "Online", "hybrid": "Hybrid" }, "default_value": "in-person", "return_format": "value", "multiple": 0, "allow_null": 0, "ui": 0 },
+      { "key": "field_tina_event_venue", "label": "Venue", "name": "venue", "type": "text", "instructions": "Building or room name." },
+      {
+        "key": "field_tina_event_location", "label": "Location", "name": "location", "type": "group", "layout": "block",
+        "sub_fields": [
+          { "key": "field_tina_event_address", "label": "Street address", "name": "address", "type": "text" },
+          { "key": "field_tina_event_city", "label": "City", "name": "city", "type": "text" }
+        ]
+      },
+      { "key": "field_tina_event_tickets", "label": "Ticket URL", "name": "ticket_url", "type": "url" },
+      { "key": "field_tina_event_price", "label": "Price (AUD)", "name": "price", "type": "number", "min": 0 },
+      { "key": "field_tina_event_free", "label": "Free event", "name": "is_free", "type": "true_false", "ui": 1 },
+      { "key": "field_tina_event_speakers", "label": "Speakers", "name": "speakers", "type": "relationship", "post_type": ["team_member"], "return_format": "id", "filters": ["search"] },
+      { "key": "field_tina_event_tab_agenda", "label": "Agenda", "name": "", "type": "tab", "placement": "top" },
+      { "key": "field_tina_event_agenda", "label": "Agenda", "name": "agenda", "type": "wysiwyg", "tabs": "all", "toolbar": "full", "media_upload": 1 }
+    ],
+    "location": [[{ "param": "post_type", "operator": "==", "value": "event" }]],
+    "menu_order": 0,
+    "position": "normal",
+    "style": "default",
+    "label_placement": "top",
+    "instruction_placement": "label",
+    "hide_on_screen": "",
+    "active": true,
+    "description": ""
+  },
+  {
+    "key": "group_tina_team_profile",
+    "title": "Profile",
+    "fields": [
+      { "key": "field_tina_team_note", "label": "Heads up", "name": "", "type": "message", "message": "Shown on the public Team page." },
+      { "key": "field_tina_team_role", "label": "Role", "name": "role", "type": "text", "required": 1 },
+      { "key": "field_tina_team_bio", "label": "Short bio", "name": "bio", "type": "textarea", "rows": 4 },
+      { "key": "field_tina_team_headshot", "label": "Headshot", "name": "headshot", "type": "image", "return_format": "array", "preview_size": "medium" },
+      { "key": "field_tina_team_email", "label": "Email", "name": "email", "type": "email" },
+      { "key": "field_tina_team_linkedin", "label": "LinkedIn", "name": "linkedin", "type": "url" },
+      { "key": "field_tina_team_skills", "label": "Skills", "name": "skills", "type": "checkbox", "choices": { "dotnet": ".NET", "react": "React", "azure": "Azure", "ai": "AI" }, "return_format": "value", "layout": "horizontal" },
+      { "key": "field_tina_team_started", "label": "Started at SSW", "name": "started", "type": "date_picker", "display_format": "d/m/Y", "return_format": "Ymd", "first_day": 1 },
+      { "key": "field_tina_team_pin", "label": "Kiosk PIN", "name": "kiosk_pin", "type": "password" }
+    ],
+    "location": [[{ "param": "post_type", "operator": "==", "value": "team_member" }]],
+    "menu_order": 0,
+    "position": "normal",
+    "style": "default",
+    "label_placement": "top",
+    "instruction_placement": "label",
+    "hide_on_screen": "",
+    "active": true,
+    "description": ""
+  },
+  {
+    "key": "group_tina_page_hero",
+    "title": "Page Hero",
+    "fields": [
+      { "key": "field_tina_hero_heading", "label": "Heading", "name": "hero_heading", "type": "text" },
+      { "key": "field_tina_hero_subheading", "label": "Subheading", "name": "hero_subheading", "type": "textarea", "rows": 2 },
+      { "key": "field_tina_hero_cta", "label": "Call to action", "name": "hero_cta", "type": "link", "return_format": "array" },
+      { "key": "field_tina_hero_background", "label": "Background image", "name": "hero_background", "type": "image", "return_format": "url" },
+      { "key": "field_tina_hero_colour", "label": "Accent colour", "name": "hero_colour", "type": "color_picker", "default_value": "#cc4141" }
+    ],
+    "location": [[{ "param": "post_type", "operator": "==", "value": "page" }]],
+    "menu_order": 0,
+    "position": "acf_after_title",
+    "style": "default",
+    "label_placement": "top",
+    "instruction_placement": "label",
+    "hide_on_screen": "",
+    "active": true,
+    "description": ""
+  }
+]
