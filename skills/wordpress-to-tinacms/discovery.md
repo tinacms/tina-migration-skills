@@ -1,36 +1,28 @@
-# Discovery questions
+# Discovery: defaults, not questions
 
-Short — the skill derives most of what it needs from `/wp-admin` directly. These questions cover what the admin tour can't answer and what the user must decide.
+The skill runs from one prompt. The admin tour answers most of what a discovery call would, so use these defaults and **don't ask**. Write the ones you used into `migration/context.md`. If the user's prompt says otherwise for any of them, follow the prompt.
 
-## 1. The source WordPress site
+## Defaults
 
-1. **URL** — public URL of the site, e.g. `https://example.com`
-2. **Admin URL** — usually `<url>/wp-admin`, sometimes relocated (`/login`, `/manage`)
-3. **Credentials** — written only to `migration/.env.local` (gitignored), never to chat. See the credentials block in `SKILL.md` step 1.
-4. **2FA / SSO** — any extra auth step beyond username + password? If yes, agree on how to get past it headlessly, or run headed.
+| Topic | Default | Notes |
+|---|---|---|
+| Site URL | From the prompt | The only thing to ask for if it's missing |
+| Admin login URL | `<url>/wp-admin` | The tour needs WordPress's standard `/wp-login.php`. If a security plugin moved it, use the export fallback in `SKILL.md` |
+| Credentials | An Administrator login in `migration/.env.local` | Never in chat. The user fills in the file once |
+| 2FA / SSO | Not assumed | If the login check fails on 2FA, the user removes the `#` before `HEADLESS=false` and enters the code in the browser window |
+| Project folder | `<host>-tinacms` in the current folder | `https://www.example.com` → `example-com-tinacms` |
+| Framework | Astro (`tina-astro-starter`) | Never switch on your own. If the tour finds shop, membership or course plugins, say in the summary that their features need an app (Next.js or a service) |
+| Drafts | Skipped | Re-run `transform-content.ts --drafts` to include them |
+| Trashed items | Skipped | |
+| Comments | Not migrated | Listed under **Needs a decision** if posts have them |
+| Forms, search, shop, membership | Not migrated | Listed under **Needs a decision** when the plugin is active |
+| URLs | Kept | Routes follow the WordPress permalinks. Any URL that changes gets a redirect |
+| Content freeze | None for the local copy | The go-live checklist has a freeze-and-refresh step before switching the domain |
 
-## 2. The target local project
+## When to ask anyway
 
-5. **Target directory** — where should the new project live locally? Default: a sibling of the current WP checkout.
-6. **Target framework** — Astro (default) or Next.js. Switch to Next.js only if the user confirms any of:
-   - User accounts beyond read-only
-   - Logged-in dashboards or admin-like features
-   - Server-rendered personalized pages
-   - Cart / checkout
-   - A heavy React component library the team already owns
-
-## 3. Scope boundaries
-
-7. **Drafts** — migrate as drafts, as published, or skip entirely? Default: skip (common WordPress sites have a leftover default "Privacy Policy" draft nobody wants).
-8. **Trashed items** — migrate, skip, or restore? Default: skip.
-9. **Custom plugins extending the editor** — ACF, Yoast, Rank Math, CPT UI, Pods, etc. The admin tour discovers these automatically, but it helps to know up front which are in use so the schema mapping can be verified.
-10. **Explicitly out of scope** — forms, e-commerce, membership, comments, search. Confirm these aren't expected.
-
-## 4. Operational
-
-11. **Content freeze** — anyone editing the WordPress site during migration? If yes, agree a freeze window or plan a delta migration.
-12. **URL preservation** — keep existing URLs? Default: yes.
+Only at the stop points in `SKILL.md`: no URL, not WordPress, the credentials, a failed login check, a failed export, or a build you can't fix.
 
 ## Record
 
-Write the answers to `migration/context.md` in the new project directory. The admin-tour script and later steps reference this file.
+`migration/context.md` holds the site URL, the date, the defaults above, and anything the user overrode. It's committed with the project, so the team can see what the migration assumed.

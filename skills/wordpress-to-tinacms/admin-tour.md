@@ -70,11 +70,33 @@ Trimmed from a real run against `test-sites/wordpress` (full output: [`expected-
 
 `source` is not part of the Tina schema. It records where each value lives in WordPress, so the content transformer can find it in `wp-export.xml`. Strip it when writing `tina/collections/*.ts`.
 
+## No Administrator login: `--from-export`
+
+Sometimes nobody can hand over an Administrator login, but someone can send files. With `migration/wp-export.xml` (Tools → Export → All content) and, for ACF sites, `migration/acf-field-groups.json` (ACF → Tools → Export As JSON, or the theme's `acf-json/` files):
+
+```bash
+migration/node_modules/.bin/tsx migration/wp-admin-tour.ts --from-export
+```
+
+No browser, no credentials. It writes the same `schema.json`, marked `"derivedFrom": "export"`, using the same field mapping as the tour. What it can't see:
+
+| The tour reads | `--from-export` uses instead |
+|---|---|
+| Which panels the editor shows | Panels with stored values. A field nobody has filled in yet (e.g. a featured image) won't appear |
+| ACF field groups from ACF → Tools | `acf-field-groups.json`. Without it, ACF values are listed as `unmapped` with the fix, not guessed |
+| Groups shown by template or options-page rules | Only `post_type ==` rules. Others are logged so you can attach them by hand |
+| Menu labels ("Team") | A label made from the slug ("Team Members") |
+| Settings → Permalinks | A guess from a published post's URL |
+| Settings → Reading | The site's public `/wp-json/`, which reports the front page and posts page. If it's switched off: the front page from the export (it has the site's root URL), and you set `site.frontPage.postsPageId` by hand |
+| Active plugins | ACF, Yoast and Rank Math, detected from stored values. `plugins.active` is empty |
+
+On the test site, the result matches the observed schema, apart from those gaps.
+
 ## Headful vs headless
 
 Default: `headless: true`. Fastest, no browser window popping up.
 
-Switch to `headless: false` when:
+Switch to headed (`HEADLESS=false` in `migration/.env.local`) when:
 - WordPress site has 2FA — user needs to complete it interactively
 - WAF (Cloudflare, Sucuri, Wordfence) blocks headless Chromium — a headed browser with a real user-agent sometimes gets through
 - Debugging — watching the automation makes it easier to spot where it breaks
@@ -82,7 +104,7 @@ Switch to `headless: false` when:
 ## What the tour does NOT do
 
 - **Does not infer schema from the frontend.** The admin derives from the editor UI, not from how posts render publicly. Fields hidden from frontend but present in the editor still get included.
-- **Does not copy the WP admin's look or workflow.** Just the schema. Draft/publish states, revisions, scheduled posts, media library layout, user roles — all out of scope for v1 (see `discovery.md` step 10).
+- **Does not copy the WP admin's look or workflow.** Just the schema. Draft/publish states, revisions, scheduled posts, media library layout, user roles — all out of scope for v1 (see `discovery.md`).
 - **Does not install any plugins or modify the WordPress site.** Read-only observation plus the standard Export buttons. Opening an Add-New screen creates an empty auto-draft, which WordPress deletes on its own after 7 days. It never shows up in the post lists.
 
 ## Extending for a specific plugin
@@ -100,8 +122,9 @@ Commit the new detection block back to this skill repo so the next migration ben
 
 | Failure | Likely cause | Fix |
 |---|---|---|
-| `wp-login.php` returns 403 | WAF blocking headless Chromium | Switch to `headless: false` or add real user-agent |
-| `this account can't open plugins.php …` | The account isn't an Administrator (e.g. Editor) | Ask for an Administrator account. Editors can't see Plugins, Export or Settings |
+| `wp-login.php` returns 403 | WAF blocking headless Chromium | Set `HEADLESS=false` in `.env.local`, or add a real user-agent |
+| `wp-login.php` returns 404 | A security plugin moved the login page | Ask for export files and use `--from-export` |
+| `this account can't open plugins.php …` | The account isn't an Administrator (e.g. Editor) | Ask for an Administrator account, or export files and `--from-export`. Editors can't see Plugins, Export or Settings |
 | Login succeeds but Add New screens 404 | Permalinks not set to pretty URLs | Use the `?post_type=<slug>&p=new` fallback URL |
 | `ACF is active but the export tool lists no field groups` | Field groups registered in PHP (`acf_add_local_field_group`) or only in the theme's `acf-json/` folder | Ask the user for the theme's `acf-json/` folder (same JSON format) and drop the files into `migration/acf-field-groups.json` |
 | A metabox appears under `unmapped` | A plugin or theme added fields the tour doesn't know | Ask the user what it holds. If it matters, add a detection block (below) |
