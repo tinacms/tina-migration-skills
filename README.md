@@ -8,12 +8,34 @@ Each skill is a reusable, discoverable prompt that an AI assistant (Claude Code,
 
 Early. First skill — `wordpress-to-tinacms` — is in progress. See issue [tinacms/tina.io#4959](https://github.com/tinacms/tina.io/issues/4959) for scope and progress.
 
+## Quick start (Claude Code)
+
+Install the plugin once, from inside Claude Code:
+
+```
+/plugin marketplace add tinacms/tina-migration-skills
+/plugin install tina-migration@tinacms
+```
+
+Then, in an empty folder, ask for the migration:
+
+```
+/tina-migration:wordpress-to-tinacms https://example.com
+```
+
+Or just say *"Migrate example.com from WordPress to TinaCMS"*. Claude picks up the skill on its own.
+
+New versions arrive when you run `/plugin marketplace update tinacms`, or on their own if you turn on auto-update for `tinacms` under **Marketplaces** in `/plugin`.
+
 ## Repository layout
 
 ```
 tina-migration-skills/
 ├── README.md                                   # this file
 ├── LICENSE                                     # MIT
+├── .claude-plugin/
+│   ├── plugin.json                             # the repo is a Claude Code plugin ("tina-migration")…
+│   └── marketplace.json                        # …and its own marketplace ("tinacms")
 ├── skills/
 │   ├── wordpress-to-tinacms/
 │   │   ├── SKILL.md                            # orchestrator prompt the AI loads
@@ -99,23 +121,29 @@ If a skill picks Next.js, it should say so explicitly and explain why in its out
 
 Skills are written as plain Markdown so they can be used with:
 
-- **Claude Code** — drop the skill folder into `.claude/skills/` and invoke by name
+- **Claude Code** — install the plugin (see [Quick start](#quick-start-claude-code))
 - **Cursor / Windsurf** — paste the `SKILL.md` into a rule file or chat
 - **Any other AI assistant** — the Markdown is the prompt
 
-## Using a skill with Claude Code
-
-```bash
-# From your project root:
-mkdir -p .claude/skills
-cp -R /path/to/tina-migration-skills/skills/wordpress-to-tinacms .claude/skills/
-```
-
-Then invoke it from Claude Code the same way you invoke any skill (`/wordpress-to-tinacms` or ask Claude to use it).
-
 ## Using a skill with other AI assistants
 
-Open the skill's `SKILL.md` and paste its contents into your assistant's prompt / rules / system message. The skill will ask the same discovery questions and follow the same paths.
+Clone this repo and point your assistant at the skill's `SKILL.md`, or paste its contents into your assistant's prompt / rules / system message. Where it says `${CLAUDE_SKILL_DIR}`, use the path of the skill's folder in your clone, so the assistant can find the scripts and templates. The skill asks the same discovery questions and follows the same steps.
+
+## Developing the plugin
+
+Load your working copy instead of the published plugin:
+
+```bash
+claude --plugin-dir /path/to/tina-migration-skills
+```
+
+Check the manifests before you push:
+
+```bash
+claude plugin validate /path/to/tina-migration-skills
+```
+
+Bump `version` in [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json) when you release. Installed copies stay on their version until it changes.
 
 ## Contributing
 
